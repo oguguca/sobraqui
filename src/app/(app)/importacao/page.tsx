@@ -1,0 +1,72 @@
+import { History } from "lucide-react";
+import type { Metadata } from "next";
+
+import { ImportHistory } from "@/components/import/import-history";
+import { ImportWizard } from "@/components/import/import-wizard";
+import { EmptyState, PageHeader } from "@/components/shared";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { requireAuth } from "@/server/auth";
+import { loadLedgerContext } from "@/server/queries/context";
+
+export const metadata: Metadata = { title: "Importação" };
+
+export default async function ImportPage() {
+  const ctx = await requireAuth();
+  const [ledger, { data: batches, error }] = await Promise.all([
+    loadLedgerContext(ctx),
+    ctx.supabase.from("import_batches").select("*").order("created_at", { ascending: false }).limit(50),
+  ]);
+  if (error) throw new Error(error.message);
+  const targets = { ...ledger.lookups.accounts, ...ledger.lookups.cards };
+
+  return (
+    <>
+      <PageHeader
+        title="Importação bancária"
+        description="Importe extratos e faturas exportados pelo app do banco. Nunca pedimos sua senha bancária."
+      />
+      <div className="grid gap-6 xl:grid-cols-[1fr_340px]">
+        <ImportWizard options={ledger.formOptions} today={ledger.today} />
+        <Card className="h-fit">
+          <CardHeader>
+            <CardTitle>Como exportar do Nubank</CardTitle>
+          </CardHeader>
+          <CardContent className="grid gap-4 text-sm text-muted-foreground">
+            <div>
+              <p className="font-medium text-foreground">Extrato da conta (CSV ou OFX)</p>
+              <p>
+                No app, a opção de exportar fica no extrato da conta: escolha o período e o formato (CSV ou OFX).
+              </p>
+            </div>
+            <div>
+              <p className="font-medium text-foreground">Fatura do cartão (CSV)</p>
+              <p>A exportação fica na tela da fatura. Cada arquivo corresponde a uma fatura.</p>
+            </div>
+            <p>
+              Os caminhos no app podem mudar com atualizações do Nubank. Transações repetidas são detectadas pelo
+              identificador do banco ou por data, valor e descrição, então reimportar o mesmo período é seguro.
+            </p>
+            <p>
+              Pagamentos de fatura que aparecem na fatura do cartão são ignorados por padrão: registre-os pelo extrato da
+              conta para que a saída de dinheiro seja contada uma única vez.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="mt-6">
+        <CardHeader>
+          <CardTitle>Histórico de importações</CardTitle>
+          <CardDescription>Desfazer remove só as transações daquele arquivo.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {!batches?.length ? (
+            <EmptyState icon={History} title="Nenhuma importação ainda" className="border-0" />
+          ) : (
+            <ImportHistory batches={batches} targets={targets} timezone={ctx.user.timezone} />
+          )}
+        </CardContent>
+      </Card>
+    </>
+  );
+}

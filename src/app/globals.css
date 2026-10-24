@@ -1,0 +1,174 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "shadcn/tailwind.css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: var(--font-geist-sans);
+  --font-mono: var(--font-geist-mono);
+  --font-heading: var(--font-geist-sans);
+  --color-positive: var(--positive);
+  --color-positive-soft: var(--positive-soft);
+  --color-negative: var(--negative);
+  --color-negative-soft: var(--negative-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-sidebar-ring: var(--sidebar-ring);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+  --color-sidebar-accent: var(--sidebar-accent);
+  --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+  --color-sidebar-primary: var(--sidebar-primary);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar: var(--sidebar);
+  --color-chart-5: var(--chart-5);
+  --color-chart-4: var(--chart-4);
+  --color-chart-3: var(--chart-3);
+  --color-chart-2: var(--chart-2);
+  --color-chart-1: var(--chart-1);
+  --color-ring: var(--ring);
+  --color-input: var(--input);
+  --color-border: var(--border);
+  --color-destructive: var(--destructive);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-accent: var(--accent);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-muted: var(--muted);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-secondary: var(--secondary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary: var(--primary);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-popover: var(--popover);
+  --color-card-foreground: var(--card-foreground);
+  --color-card: var(--card);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) * 1.4);
+  --radius-2xl: calc(var(--radius) * 1.8);
+  --radius-3xl: calc(var(--radius) * 2.2);
+  --radius-4xl: calc(var(--radius) * 2.6);
+}
+
+:root {
+  --radius: 0.75rem;
+  --background: oklch(0.982 0.002 247);
+  --foreground: oklch(0.2 0.012 256);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.2 0.012 256);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.2 0.012 256);
+  --primary: oklch(0.27 0.02 256);
+  --primary-foreground: oklch(0.985 0.002 247);
+  --secondary: oklch(0.955 0.004 247);
+  --secondary-foreground: oklch(0.27 0.02 256);
+  --muted: oklch(0.955 0.004 247);
+  --muted-foreground: oklch(0.52 0.014 256);
+  --accent: oklch(0.95 0.005 247);
+  --accent-foreground: oklch(0.27 0.02 256);
+  --destructive: oklch(0.58 0.2 25);
+  --border: oklch(0.915 0.005 247);
+  --input: oklch(0.9 0.006 247);
+  --ring: oklch(0.6 0.08 165);
+  /* Semântica financeira: verde entra, vermelho sai. */
+  --positive: oklch(0.56 0.13 160);
+  --positive-soft: oklch(0.95 0.035 160);
+  --negative: oklch(0.58 0.17 22);
+  --negative-soft: oklch(0.96 0.025 22);
+  --warning: oklch(0.7 0.14 70);
+  --warning-soft: oklch(0.96 0.04 85);
+  /* Pares validados com o validador de paleta (CVD e contraste) em cada modo. */
+  --chart-income: #047857;
+  --chart-expense: #e11d48;
+  --chart-balance: oklch(0.38 0.03 256);
+  --chart-grid: oklch(0.92 0.005 247);
+  --chart-1: oklch(0.56 0.13 160);
+  --chart-2: oklch(0.58 0.17 22);
+  --chart-3: oklch(0.55 0.12 250);
+  --chart-4: oklch(0.7 0.14 70);
+  --chart-5: oklch(0.55 0.15 300);
+  --sidebar: oklch(0.975 0.003 247);
+  --sidebar-foreground: oklch(0.3 0.015 256);
+  --sidebar-primary: oklch(0.27 0.02 256);
+  --sidebar-primary-foreground: oklch(0.985 0.002 247);
+  --sidebar-accent: oklch(0.935 0.006 247);
+  --sidebar-accent-foreground: oklch(0.2 0.012 256);
+  --sidebar-border: oklch(0.915 0.005 247);
+  --sidebar-ring: oklch(0.6 0.08 165);
+}
+
+.dark {
+  --background: oklch(0.16 0.008 256);
+  --foreground: oklch(0.95 0.004 247);
+  --card: oklch(0.2 0.01 256);
+  --card-foreground: oklch(0.95 0.004 247);
+  --popover: oklch(0.22 0.01 256);
+  --popover-foreground: oklch(0.95 0.004 247);
+  --primary: oklch(0.93 0.005 247);
+  --primary-foreground: oklch(0.2 0.012 256);
+  --secondary: oklch(0.26 0.012 256);
+  --secondary-foreground: oklch(0.95 0.004 247);
+  --muted: oklch(0.26 0.012 256);
+  --muted-foreground: oklch(0.7 0.012 256);
+  --accent: oklch(0.27 0.012 256);
+  --accent-foreground: oklch(0.95 0.004 247);
+  --destructive: oklch(0.68 0.17 22);
+  --border: oklch(1 0 0 / 9%);
+  --input: oklch(1 0 0 / 14%);
+  --ring: oklch(0.65 0.1 165);
+  --positive: oklch(0.72 0.13 160);
+  --positive-soft: oklch(0.3 0.05 160);
+  --negative: oklch(0.7 0.15 22);
+  --negative-soft: oklch(0.3 0.06 22);
+  --warning: oklch(0.78 0.13 75);
+  --warning-soft: oklch(0.32 0.05 75);
+  --chart-income: #219c79;
+  --chart-expense: #e5484d;
+  --chart-balance: oklch(0.82 0.02 256);
+  --chart-grid: oklch(1 0 0 / 8%);
+  --chart-1: oklch(0.72 0.13 160);
+  --chart-2: oklch(0.7 0.15 22);
+  --chart-3: oklch(0.7 0.11 250);
+  --chart-4: oklch(0.78 0.13 75);
+  --chart-5: oklch(0.7 0.13 300);
+  --sidebar: oklch(0.18 0.009 256);
+  --sidebar-foreground: oklch(0.9 0.005 247);
+  --sidebar-primary: oklch(0.93 0.005 247);
+  --sidebar-primary-foreground: oklch(0.2 0.012 256);
+  --sidebar-accent: oklch(0.25 0.012 256);
+  --sidebar-accent-foreground: oklch(0.95 0.004 247);
+  --sidebar-border: oklch(1 0 0 / 8%);
+  --sidebar-ring: oklch(0.65 0.1 165);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+  button:not(:disabled), [role="button"]:not(:disabled) {
+    cursor: pointer;
+  }
+  html {
+    @apply font-sans;
+  }
+  /* Valores monetários alinhados em colunas. */
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+@media print {
+  [data-print-hidden] {
+    display: none !important;
+  }
+  body {
+    background: white;
+  }
+}
