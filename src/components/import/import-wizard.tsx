@@ -26,8 +26,8 @@ import { confirmImport, previewImport } from "@/server/actions/imports";
 import type { ImportReport, PreviewResult } from "@/server/import-service";
 import type { FormOptions } from "@/server/queries/core";
 
-type Preview = Extract<PreviewResult, { kind: "preview" }>;
-type Decision = { action: ImportAction; categoryId: string | null };
+export type Preview = Extract<PreviewResult, { kind: "preview" }>;
+export type Decision = { action: ImportAction; categoryId: string | null };
 
 const ACTION_LABEL: Record<ImportAction, string> = {
   income: "Receita",
@@ -278,7 +278,7 @@ export function ImportWizard({ options, today }: { options: FormOptions; today: 
   );
 }
 
-function Count({ label, value }: { label: string; value: number }) {
+export function Count({ label, value }: { label: string; value: number }) {
   return (
     <div>
       <dt className="text-muted-foreground">{label}</dt>
@@ -412,7 +412,7 @@ function MappingStep({
   );
 }
 
-function PreviewStep({
+export function PreviewStep({
   preview,
   target,
   options,
@@ -460,7 +460,8 @@ function PreviewStep({
       action === "income" ? c.kind === "income" : action === "expense" || action === "refund" ? c.kind === "expense" : false,
     );
 
-  const blocked = (target === "card" && !invoiceMonth) || (needsPaymentCard && !paymentCardId) || selected.length === 0;
+  const perPurchaseInvoice = preview.format === "pluggy";
+  const blocked = (target === "card" && !invoiceMonth && !perPurchaseInvoice) || (needsPaymentCard && !paymentCardId) || selected.length === 0;
 
   return (
     <Card>
@@ -506,7 +507,12 @@ function PreviewStep({
         )}
 
         <div className="flex flex-wrap gap-4">
-          {target === "card" && (
+          {target === "card" && perPurchaseInvoice && (
+            <p className="text-sm text-muted-foreground">
+              Cada compra vai para a fatura da sua data, conforme o dia de fechamento do cartão. Parcelas ficam agrupadas.
+            </p>
+          )}
+          {target === "card" && !perPurchaseInvoice && (
             <FormField id="import-invoice" label="Fatura que recebe estas compras" className="w-64">
               <Select value={invoiceMonth ?? ""} onValueChange={setInvoiceMonth}>
                 <SelectTrigger id="import-invoice" className="w-full capitalize">

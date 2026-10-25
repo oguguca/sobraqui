@@ -3,8 +3,10 @@ import "server-only";
 import { z } from "zod";
 
 import { isISODate } from "@/domain/dates";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Prisma } from "@/generated/prisma/client";
+import type { Tables } from "@/lib/db/types";
 import type { AuthContext } from "@/server/auth";
+import { dbDate } from "@/server/db";
 
 import { fetchAll } from "./core";
 
@@ -26,7 +28,8 @@ export const transactionFiltersSchema = z.object({
   to: optionalDate,
   kind: z.enum(["income", "expense", "refund", "transfer", "invoice_payment"]).optional().catch(undefined),
   status: z.enum(["paid", "pending"]).optional().catch(undefined),
-  category: optionalId,
+  /** UUID da categoria ou "none" para lançamentos sem categoria. */
+  category: z.union([z.uuid(), z.literal("none")]).optional().catch(undefined),
   account: optionalId,
   card: optionalId,
   sort: z.enum(["date_desc", "date_asc", "amount_desc", "amount_asc"]).default("date_desc").catch("date_desc"),
@@ -42,65 +45,91 @@ export function parseTransactionFilters(params: Record<string, string | string[]
   return transactionFiltersSchema.parse(flat);
 }
 
-/** Escapa curingas do LIKE para a busca tratar % e _ como texto. */
-function likePattern(q: string) {
-  return `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+/** Lançamentos de uma conta: como origem ou como destino de transferência. */
+export function touchesAccount(accountId: string): Prisma.TransactionWhereInput {
+  return { OR: [{ account_id: accountId }, { destination_account_id: accountId }] };
 }
 
-function filteredQuery(supabase: AuthContext["supabase"], f: TransactionFilters, count?: "exact") {
-  let query = supabase.from("transactions").select("*", count ? { count } : undefined);
-  if (f.q) query = query.ilike("description", likePattern(f.q));
-  if (f.from) query = query.gte("occurred_on", f.from);
-  if (f.to) query = query.lte("occurred_on", f.to);
-  if (f.kind) query = query.eq("kind", f.kind);
-  if (f.status) query = query.eq("status", f.status);
-  if (f.category) query = query.eq("category_id", f.category);
-  // UUID validado pelo schema; seguro para interpolar no filtro "or".
-  if (f.account) query = query.or(`account_id.eq.${f.account},destination_account_id.eq.${f.account}`);
-  if (f.card) query = query.eq("credit_card_id", f.card);
-
-  const [column, direction] = f.sort.startsWith("amount") ? ["amount_cents", f.sort] : ["occurred_on", f.sort];
-  const ascending = direction.endsWith("asc");
-  return query.order(column, { ascending }).order("created_at", { ascending }).order("id");
+export function dateRange(from?: string, to?: string): Prisma.TransactionWhereInput {
+  if (!from && !to) return {};
+  return { occurred_on: { ...(from ? { gte: dbDate(from) } : {}), ...(to ? { lte: dbDate(to) } : {}) } };
 }
 
-export async function listTransactions({ supabase }: AuthContext, f: TransactionFilters) {
-  const fromRow = (f.page - 1) * PAGE_SIZE;
-  const { data, count, error } = await filteredQuery(supabase, f, "exact").range(fromRow, fromRow + PAGE_SIZE - 1);
-  if (error) throw new Error(error.message);
-  return { rows: data ?? [], total: count ?? 0, pageSize: PAGE_SIZE };
+function filterWhere(userId: string, f: TransactionFilters): Prisma.TransactionWhereInput {
+  return {
+    user_id: userId,
+    AND: [
+      f.q ? { description: { contains: f.q, mode: "insensitive" } } : {},
+      dateRange(f.from, f.to),
+      f.kind ? { kind: f.kind } : {},
+      f.status ? { status: f.status } : {},
+      f.category === "none"
+        ? { category_id: null, kind: { in: ["income", "expense", "refund"] } }
+        : f.category
+          ? { category_id: f.category }
+          : {},
+      f.account ? touchesAccount(f.account) : {},
+      f.card ? { credit_card_id: f.card } : {},
+    ],
+  };
+}
+
+function orderBy(f: TransactionFilters): Prisma.TransactionOrderByWithRelationInput[] {
+  const dir: Prisma.SortOrder = f.sort.endsWith("asc") ? "asc" : "desc";
+  const main = f.sort.startsWith("amount") ? { amount_cents: dir } : { occurred_on: dir };
+  return [main, { created_at: dir }, { id: "asc" }];
+}
+
+export async function listTransactions(ctx: AuthContext, f: TransactionFilters) {
+  const where = filterWhere(ctx.user.id, f);
+  const [rows, total] = await ctx.db((tx) =>
+    Promise.all([
+      tx.transaction.findMany({ where, orderBy: orderBy(f), skip: (f.page - 1) * PAGE_SIZE, take: PAGE_SIZE }),
+      tx.transaction.count({ where }),
+    ]),
+  );
+  return { rows, total, pageSize: PAGE_SIZE };
 }
 
 /** Todas as linhas que atendem aos filtros, sem paginação (exportação). */
-export async function allFilteredTransactions({ supabase }: AuthContext, f: TransactionFilters) {
-  return fetchAll((from, to) => filteredQuery(supabase, f).range(from, to));
+export async function allFilteredTransactions(ctx: AuthContext, f: TransactionFilters) {
+  const where = filterWhere(ctx.user.id, f);
+  return ctx.db((tx) =>
+    fetchAll((skip, take) => tx.transaction.findMany({ where, orderBy: orderBy(f), skip, take })),
+    { timeoutMs: 30_000 },
+  );
 }
 
-/** Todos os lançamentos de um intervalo (para cálculos e exportação). */
+/** Todos os lançamentos de um intervalo (para cálculos). */
 export async function transactionsBetween(
-  { supabase }: AuthContext,
+  ctx: AuthContext,
   range: { from?: string; to?: string },
   opts: { accountId?: string; cardId?: string } = {},
 ): Promise<Transaction[]> {
-  return fetchAll((from, to) => {
-    let q = supabase.from("transactions").select("*");
-    if (range.from) q = q.gte("occurred_on", range.from);
-    if (range.to) q = q.lte("occurred_on", range.to);
-    if (opts.accountId) q = q.or(`account_id.eq.${opts.accountId},destination_account_id.eq.${opts.accountId}`);
-    if (opts.cardId) q = q.eq("credit_card_id", opts.cardId);
-    return q.order("occurred_on", { ascending: true }).order("id").range(from, to);
-  });
+  const where: Prisma.TransactionWhereInput = {
+    user_id: ctx.user.id,
+    AND: [
+      dateRange(range.from, range.to),
+      opts.accountId ? touchesAccount(opts.accountId) : {},
+      opts.cardId ? { credit_card_id: opts.cardId } : {},
+    ],
+  };
+  return ctx.db(
+    (tx) =>
+      fetchAll((skip, take) =>
+        tx.transaction.findMany({ where, orderBy: [{ occurred_on: "asc" }, { id: "asc" }], skip, take }),
+      ),
+    { timeoutMs: 30_000 },
+  );
 }
 
 /** Efeito previsto dos lançamentos pendentes no saldo da conta. */
-export async function pendingEffect({ supabase }: AuthContext, accountId: string) {
-  const rows = await fetchAll((from, to) =>
-    supabase
-      .from("transactions")
-      .select("kind, amount_cents, account_id, destination_account_id")
-      .eq("status", "pending")
-      .or(`account_id.eq.${accountId},destination_account_id.eq.${accountId}`)
-      .range(from, to),
+export async function pendingEffect(ctx: AuthContext, accountId: string) {
+  const rows = await ctx.db((tx) =>
+    tx.transaction.findMany({
+      where: { user_id: ctx.user.id, status: "pending", ...touchesAccount(accountId) },
+      select: { kind: true, amount_cents: true, destination_account_id: true },
+    }),
   );
   let cents = 0;
   for (const t of rows) {

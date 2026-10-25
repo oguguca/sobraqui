@@ -1,6 +1,6 @@
 import type { ISODate } from "../dates";
 
-export type ImportFormat = "nubank_account_csv" | "nubank_card_csv" | "ofx" | "generic_csv";
+export type ImportFormat = "nubank_account_csv" | "nubank_card_csv" | "ofx" | "generic_csv" | "pluggy";
 
 /** Tipo de destino do arquivo: extrato de conta ou fatura de cartão. */
 export type ImportTarget = "account" | "card";
@@ -18,12 +18,26 @@ export type RawRecord = {
   externalId: string | null;
   /** Categoria informada pelo banco, quando existe (só para sugestão). */
   rawCategory: string | null;
+  /** Classificação já conhecida pela fonte (ex.: Open Finance), que vence as heurísticas. */
+  hints?: RecordHints;
+};
+
+export type RecordHints = {
+  action?: ImportAction;
+  suggestion?: string;
+  paymentMethod?: PaymentMethod | null;
+  /** Parcela de compra parcelada; groupKey é igual para todas as parcelas da compra. */
+  installment?: { number: number; total: number; groupKey: string };
+  /** Nome de categoria padrão sugerida pela fonte (casada com as categorias do usuário pelo nome). */
+  categoryName?: string | null;
 };
 
 export type RowError = { line: number; reason: string };
 
 /** O que fazer com uma linha. "skip" ignora a linha nesta importação. */
 export type ImportAction = "income" | "expense" | "refund" | "invoice_payment" | "skip";
+
+export type PaymentMethod = "pix" | "debit_card" | "credit_card" | "boleto" | "cash" | "transfer" | "other";
 
 export type PreviewRow = RawRecord & {
   index: number;
@@ -35,6 +49,8 @@ export type PreviewRow = RawRecord & {
   /** Existe lançamento manual parecido (mesma data, valor e tipo). */
   possibleManualDuplicate: boolean;
   suggestion: string | null;
+  /** Forma de pagamento deduzida da descrição (só saídas). */
+  paymentMethod: PaymentMethod | null;
 };
 
 export type GenericCsvMapping = {

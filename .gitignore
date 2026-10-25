@@ -49,3 +49,6 @@ supabase/.temp
 /test-results/
 /playwright-report/
 /playwright/.cache/
+
+# prisma client gerado
+/src/generated/

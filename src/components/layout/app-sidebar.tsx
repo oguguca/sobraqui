@@ -28,7 +28,7 @@ export function AppSidebar({ email }: { email: string | null }) {
   const close = () => setOpenMobile(false);
 
   return (
-    <Sidebar collapsible="icon" data-print-hidden>
+    <Sidebar variant="floating" collapsible="icon" data-print-hidden>
       <SidebarHeader className="h-14 justify-center px-3">
         <Link href="/" onClick={close} className="rounded-md outline-none focus-visible:ring-2 focus-visible:ring-ring">
           <Brand className="group-data-[collapsible=icon]:[&>span:last-child]:hidden" />

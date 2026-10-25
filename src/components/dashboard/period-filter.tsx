@@ -64,14 +64,16 @@ export function PeriodFilter({
           <ChevronLeft />
         </Button>
         {!allowRange ? (
-          <span className="min-w-40 px-3 text-center text-sm font-medium first-letter:uppercase">
+          <span className="inline-block min-w-40 px-3 text-center text-sm font-medium first-letter:uppercase">
             {formatMonth(current)}
           </span>
         ) : (
         <Popover open={open} onOpenChange={setOpen}>
           <PopoverTrigger asChild>
-            <Button variant="ghost" className="min-w-40 font-medium capitalize">
-              {month ? formatMonth(month) : `${formatDate(range.from)} – ${formatDate(range.to)}`}
+            <Button variant="ghost" className="min-w-40 font-medium">
+              <span className="inline-block first-letter:uppercase">
+                {month ? formatMonth(month) : `${formatDate(range.from)} – ${formatDate(range.to)}`}
+              </span>
             </Button>
           </PopoverTrigger>
           <PopoverContent className="w-72" align="center">

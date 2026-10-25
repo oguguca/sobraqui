@@ -5,7 +5,8 @@ import { z } from "zod";
 import { addMonthsToMonth, monthStart } from "@/domain/dates";
 import { budgetSchema, goalContributionSchema, goalSchema } from "@/lib/schemas";
 import { idInput, isoMonth } from "@/lib/validation";
-import { ActionError, authedAction, check, found } from "@/server/action";
+import { ActionError, affected, authedAction, found } from "@/server/action";
+import { dbDate, dbDateOrNull } from "@/server/db";
 
 // ---------------------------------------------------------------------------
 // Orçamento
@@ -13,53 +14,51 @@ import { ActionError, authedAction, check, found } from "@/server/action";
 
 export const setBudget = authedAction(
   budgetSchema,
-  async (input, { supabase }) => {
-    const { data: category } = await supabase
-      .from("categories")
-      .select("kind")
-      .eq("id", input.categoryId)
-      .maybeSingle();
-    if (!category) throw new ActionError("Categoria não encontrada.");
-    if (category.kind !== "expense") throw new ActionError("Orçamentos são definidos para categorias de despesa.");
-
-    const { error } = await supabase.from("budgets").upsert(
-      { category_id: input.categoryId, month: monthStart(input.month), limit_cents: input.limit },
-      { onConflict: "user_id,category_id,month" },
-    );
-    check(error, "salvar o orçamento");
-    return null;
-  },
+  async (input, { db, user }) =>
+    db(async (tx) => {
+      const category = found(
+        await tx.category.findFirst({ where: { id: input.categoryId, user_id: user.id }, select: { kind: true } }),
+        "Categoria",
+      );
+      if (category.kind !== "expense") throw new ActionError("Orçamentos são definidos para categorias de despesa.");
+      const month = dbDate(monthStart(input.month));
+      await tx.budget.upsert({
+        where: { user_id_category_id_month: { user_id: user.id, category_id: input.categoryId, month } },
+        create: { user_id: user.id, category_id: input.categoryId, month, limit_cents: input.limit },
+        update: { limit_cents: input.limit },
+      });
+      return null;
+    }),
   { message: "Orçamento salvo." },
 );
 
 export const deleteBudget = authedAction(
   idInput,
-  async ({ id }, { supabase }) => {
-    const { data, error } = await supabase.from("budgets").delete().eq("id", id).select("id").maybeSingle();
-    check(error, "remover o orçamento");
-    return found(data, "Orçamento");
-  },
+  async ({ id }, { db, user }) =>
+    affected(await db((tx) => tx.budget.deleteMany({ where: { id, user_id: user.id } })), "Orçamento"),
   { message: "Orçamento removido." },
 );
 
 /** Copia os limites do mês anterior sem sobrescrever o que já foi definido. */
 export const copyPreviousBudgets = authedAction(
   z.object({ month: isoMonth }),
-  async ({ month }, { supabase }) => {
-    const { data: previous, error } = await supabase
-      .from("budgets")
-      .select("category_id, limit_cents")
-      .eq("month", monthStart(addMonthsToMonth(month, -1)));
-    check(error, "carregar o mês anterior");
-    if (!previous?.length) throw new ActionError("O mês anterior não tem orçamento definido.");
-
-    const { error: upsertError } = await supabase.from("budgets").upsert(
-      previous.map((b) => ({ category_id: b.category_id, month: monthStart(month), limit_cents: b.limit_cents })),
-      { onConflict: "user_id,category_id,month", ignoreDuplicates: true },
-    );
-    check(upsertError, "copiar o orçamento");
-    return { count: previous.length };
-  },
+  async ({ month }, { db, user }) =>
+    db(async (tx) => {
+      const previous = await tx.budget.findMany({
+        where: { user_id: user.id, month: dbDate(monthStart(addMonthsToMonth(month, -1))) },
+        select: { category_id: true, limit_cents: true },
+      });
+      if (previous.length === 0) throw new ActionError("O mês anterior não tem orçamento definido.");
+      return tx.budget.createMany({
+        data: previous.map((b) => ({
+          user_id: user.id,
+          category_id: b.category_id,
+          month: dbDate(monthStart(month)),
+          limit_cents: b.limit_cents,
+        })),
+        skipDuplicates: true,
+      });
+    }),
   { message: "Orçamento copiado do mês anterior." },
 );
 
@@ -73,74 +72,58 @@ function goalRow(input: z.output<typeof goalSchema>) {
     kind: input.kind,
     target_cents: input.target,
     saved_cents: input.saved,
-    target_date: input.targetDate,
+    target_date: dbDateOrNull(input.targetDate),
     color: input.color,
   };
 }
 
 export const createGoal = authedAction(
   goalSchema,
-  async (input, { supabase }) => {
-    const { data, error } = await supabase.from("financial_goals").insert(goalRow(input)).select("id").single();
-    check(error, "criar a meta");
-    return found(data);
-  },
+  async (input, { db, user }) =>
+    db((tx) => tx.financialGoal.create({ data: { ...goalRow(input), user_id: user.id }, select: { id: true } })),
   { message: "Meta criada." },
 );
 
 export const updateGoal = authedAction(
   goalSchema.extend({ id: z.uuid() }),
-  async ({ id, ...input }, { supabase }) => {
-    const { data, error } = await supabase.from("financial_goals").update(goalRow(input)).eq("id", id).select("id").maybeSingle();
-    check(error, "salvar a meta");
-    return found(data, "Meta");
-  },
+  async ({ id, ...input }, { db, user }) =>
+    affected(await db((tx) => tx.financialGoal.updateMany({ where: { id, user_id: user.id }, data: goalRow(input) })), "Meta"),
   { message: "Meta atualizada." },
 );
 
-/** Guarda (valor positivo) ou retira (negativo) dinheiro da meta. */
+/** Guarda (valor positivo) ou retira (negativo) dinheiro da meta, de forma atômica. */
 export const contributeToGoal = authedAction(
   goalContributionSchema,
-  async ({ id, amount }, { supabase }) => {
-    const { data: goal } = await supabase.from("financial_goals").select("saved_cents").eq("id", id).maybeSingle();
-    if (!goal) throw new ActionError("Meta não encontrada.");
-    const saved = goal.saved_cents + amount;
-    if (saved < 0) throw new ActionError("Não é possível retirar mais do que está guardado.");
-    // Compara com o valor lido para não perder um aporte concorrente.
-    const { data, error } = await supabase
-      .from("financial_goals")
-      .update({ saved_cents: saved })
-      .eq("id", id)
-      .eq("saved_cents", goal.saved_cents)
-      .select("id")
-      .maybeSingle();
-    check(error, "atualizar a meta");
-    if (!data) throw new ActionError("A meta mudou enquanto você editava. Tente de novo.");
-    return { savedCents: saved };
-  },
+  async ({ id, amount }, { db, user }) =>
+    db(async (tx) => {
+      const result = await tx.financialGoal.updateMany({
+        // Retirada só se houver saldo suficiente; incremento feito pelo banco.
+        where: { id, user_id: user.id, ...(amount < 0 ? { saved_cents: { gte: -amount } } : {}) },
+        data: { saved_cents: { increment: amount } },
+      });
+      if (result.count === 0) {
+        const exists = await tx.financialGoal.count({ where: { id, user_id: user.id } });
+        throw new ActionError(exists ? "Não é possível retirar mais do que está guardado." : "Meta não encontrada.");
+      }
+      return null;
+    }),
   { message: "Meta atualizada." },
 );
 
 export const setGoalArchived = authedAction(
   idInput.extend({ archived: z.boolean() }),
-  async ({ id, archived }, { supabase }) => {
-    const { data, error } = await supabase
-      .from("financial_goals")
-      .update({ archived_at: archived ? new Date().toISOString() : null })
-      .eq("id", id)
-      .select("id")
-      .maybeSingle();
-    check(error, "arquivar a meta");
-    return found(data, "Meta");
-  },
+  async ({ id, archived }, { db, user }) =>
+    affected(
+      await db((tx) =>
+        tx.financialGoal.updateMany({ where: { id, user_id: user.id }, data: { archived_at: archived ? new Date() : null } }),
+      ),
+      "Meta",
+    ),
 );
 
 export const deleteGoal = authedAction(
   idInput,
-  async ({ id }, { supabase }) => {
-    const { data, error } = await supabase.from("financial_goals").delete().eq("id", id).select("id").maybeSingle();
-    check(error, "excluir a meta");
-    return found(data, "Meta");
-  },
+  async ({ id }, { db, user }) =>
+    affected(await db((tx) => tx.financialGoal.deleteMany({ where: { id, user_id: user.id } })), "Meta"),
   { message: "Meta excluída." },
 );

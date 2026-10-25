@@ -1,7 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import { parseCsv } from "@/domain/import/csv";
-import { buildDedupeKeys, buildPreview, classify, parseStatementFile } from "@/domain/import/pipeline";
+import {
+  buildDedupeKeys,
+  buildPreview,
+  classify,
+  parseStatementFile,
+  suggestPaymentMethod,
+} from "@/domain/import/pipeline";
 import type { RawRecord } from "@/domain/import/types";
 
 const encoder = new TextEncoder();
@@ -182,5 +188,22 @@ describe("deduplicação", () => {
       [false, false, "expense"],
       [true, false, "skip"],
     ]);
+  });
+});
+
+describe("forma de pagamento sugerida", () => {
+  it.each([
+    ["Transferência enviada pelo Pix - Fulano", "pix"],
+    ["Compra no débito - Padaria", "debit_card"],
+    ["Pagamento de boleto efetuado - Energia", "boleto"],
+    ["TED enviada", "transfer"],
+    ["Saque", "cash"],
+    ["Mercado", null],
+  ])("%s -> %s", (description, expected) => {
+    expect(suggestPaymentMethod(description, "account")).toBe(expected);
+  });
+
+  it("fatura de cartão é sempre crédito", () => {
+    expect(suggestPaymentMethod("Padaria", "card")).toBe("credit_card");
   });
 });

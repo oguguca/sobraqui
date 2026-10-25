@@ -1,5 +1,7 @@
 import {
+  ArrowDownLeft,
   ArrowLeftRight,
+  ArrowUpRight,
   ChartPie,
   CreditCard,
   FileUp,
@@ -18,6 +20,8 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Visão geral",
     items: [
       { href: "/", label: "Dashboard", icon: LayoutDashboard },
+      { href: "/entradas", label: "Entradas", icon: ArrowDownLeft },
+      { href: "/saidas", label: "Saídas", icon: ArrowUpRight },
       { href: "/transacoes", label: "Transações", icon: ArrowLeftRight },
       { href: "/relatorios", label: "Relatórios", icon: ChartPie },
     ],

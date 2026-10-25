@@ -14,7 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useServerAction } from "@/hooks/use-server-action";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { deleteCategory, setCategoryArchived } from "@/server/actions/categories";
 
 import { CategoryFormDialog } from "./category-form-dialog";

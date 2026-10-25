@@ -15,8 +15,8 @@ import { expensesByCategory } from "@/domain/ledger";
 import { formatMoney, formatPercent } from "@/domain/money";
 import { cn } from "@/lib/utils";
 import { requireAuth } from "@/server/auth";
+import { dbDate } from "@/server/db";
 import { loadLedgerContext } from "@/server/queries/context";
-import { fetchAll } from "@/server/queries/core";
 import { transactionsBetween } from "@/server/queries/transactions";
 
 export const metadata: Metadata = { title: "Orçamento" };
@@ -35,13 +35,13 @@ export default async function BudgetPage({ searchParams }: PageProps<"/orcamento
   const historyMonths = monthsBetween(addMonthsToMonth(month, -5), month);
 
   const [budgets, transactions] = await Promise.all([
-    fetchAll((from, to) =>
-      ctx.supabase
-        .from("budgets")
-        .select("*")
-        .gte("month", monthStart(historyMonths[0]))
-        .lte("month", monthStart(month))
-        .range(from, to),
+    ctx.db((tx) =>
+      tx.budget.findMany({
+        where: {
+          user_id: ctx.user.id,
+          month: { gte: dbDate(monthStart(historyMonths[0])), lte: dbDate(monthStart(month)) },
+        },
+      }),
     ),
     transactionsBetween(ctx, { from: monthStart(historyMonths[0]), to: monthRange(month).to }),
   ]);

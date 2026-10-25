@@ -3,8 +3,8 @@
 import { Money } from "@/components/shared";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { formatDate, formatDateTime } from "@/domain/dates";
-import { TRANSACTION_KIND_LABEL, TRANSACTION_STATUS_LABEL } from "@/domain/labels";
-import type { Tables } from "@/lib/supabase/database.types";
+import { PAYMENT_METHOD_LABEL, TRANSACTION_KIND_LABEL, TRANSACTION_STATUS_LABEL } from "@/domain/labels";
+import type { Tables } from "@/lib/db/types";
 
 import type { Lookups } from "./lookups";
 
@@ -31,6 +31,7 @@ export function TransactionDetailsSheet({
               <dl className="mt-6 grid gap-4 text-sm">
                 <Item label="Data do lançamento" value={formatDate(t.occurred_on)} />
                 <Item label="Situação" value={TRANSACTION_STATUS_LABEL[t.status]} />
+                {t.payment_method && <Item label="Forma de pagamento" value={PAYMENT_METHOD_LABEL[t.payment_method]} />}
                 {t.category_id && <Item label="Categoria" value={lookups.categories[t.category_id]?.name ?? "—"} />}
                 {t.account_id && (
                   <Item

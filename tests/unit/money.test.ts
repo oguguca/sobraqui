@@ -55,3 +55,15 @@ describe("formatação", () => {
     expect(centsToInput(-5)).toBe("-0,05");
   });
 });
+
+describe("toPlain", async () => {
+  const { toPlain } = await import("@/server/db");
+  it("remove símbolos, converte bigint e preserva Map/Date", () => {
+    const row = { a: BigInt(1), d: new Date(0), [Symbol("x")]: 1, nested: [{ b: BigInt(2) }] };
+    const plain = toPlain(row);
+    expect(Object.getOwnPropertySymbols(plain)).toHaveLength(0);
+    expect(plain).toEqual({ a: 1, d: new Date(0), nested: [{ b: 2 }] });
+    const m = toPlain(new Map([["k", { v: BigInt(3) }]]));
+    expect(m.get("k")).toEqual({ v: 3 });
+  });
+});

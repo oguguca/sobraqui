@@ -94,7 +94,8 @@ export default async function CardsPage({ searchParams }: PageProps<"/cartoes">)
                           Usado <Money cents={Math.max(0, card.used_cents)} />
                         </span>
                         <span>
-                          Disponível <Money cents={card.available_cents} tone={card.available_cents < 0 ? "negative" : "neutral"} />
+                          Disponível{card.bank_synced_at ? " (banco)" : ""}{" "}
+                          <Money cents={card.available_cents} tone={card.available_cents < 0 ? "negative" : "neutral"} />
                         </span>
                       </div>
                     </div>

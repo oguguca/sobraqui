@@ -17,9 +17,9 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { formatDate } from "@/domain/dates";
-import { TRANSACTION_KIND_LABEL } from "@/domain/labels";
+import { PAYMENT_METHOD_LABEL, TRANSACTION_KIND_LABEL } from "@/domain/labels";
 import { useServerAction } from "@/hooks/use-server-action";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { deleteTransaction, markTransactionPaid } from "@/server/actions/transactions";
 
 import type { Lookups } from "./lookups";
@@ -100,6 +100,7 @@ export function TransactionsTable({
                           <span className="truncate">
                             {neutral ? TRANSACTION_KIND_LABEL[t.kind] : (category?.name ?? "Sem categoria")}
                           </span>
+                          {t.payment_method && <span className="hidden sm:inline">· {PAYMENT_METHOD_LABEL[t.payment_method]}</span>}
                           {t.installment_total && (
                             <span className="tabular">
                               · {t.installment_number}/{t.installment_total}

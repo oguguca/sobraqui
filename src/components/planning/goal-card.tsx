@@ -18,7 +18,7 @@ import { diffDays, formatDate } from "@/domain/dates";
 import { GOAL_KIND_LABEL } from "@/domain/labels";
 import { formatMoney, formatPercent } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { deleteGoal, setGoalArchived } from "@/server/actions/planning";
 
 import { GoalContributionDialog, GoalFormDialog } from "./goal-dialogs";

@@ -23,7 +23,7 @@ import { GOAL_KIND_LABEL } from "@/domain/labels";
 import { centsToInput, formatMoney, parseMoney } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
 import { goalSchema, type GoalInput, type GoalValues } from "@/lib/schemas";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { contributeToGoal, createGoal, updateGoal } from "@/server/actions/planning";
 
 export function GoalFormDialog({ goal, trigger }: { goal?: Tables<"financial_goals">; trigger: React.ReactNode }) {

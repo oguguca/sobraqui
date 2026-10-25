@@ -13,7 +13,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useServerAction } from "@/hooks/use-server-action";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { deleteCard, setCardArchived } from "@/server/actions/cards";
 
 import { CardFormDialog } from "./card-form-dialog";

@@ -15,11 +15,12 @@ export const metadata: Metadata = { title: "Metas" };
 export default async function GoalsPage({ searchParams }: PageProps<"/metas">) {
   const ctx = await requireAuth();
   const showArchived = (await searchParams).arquivadas === "1";
-  let q = ctx.supabase.from("financial_goals").select("*").order("created_at");
-  if (!showArchived) q = q.is("archived_at", null);
-  const { data, error } = await q;
-  if (error) throw new Error(error.message);
-  const goals = data ?? [];
+  const goals = await ctx.db((tx) =>
+    tx.financialGoal.findMany({
+      where: { user_id: ctx.user.id, ...(showArchived ? {} : { archived_at: null }) },
+      orderBy: { created_at: "asc" },
+    }),
+  );
   const today = todayIn(ctx.user.timezone);
   const saved = goals.filter((g) => !g.archived_at).reduce((s, g) => s + g.saved_cents, 0);
 

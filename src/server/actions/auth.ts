@@ -1,57 +1,50 @@
 "use server";
 
+import { APIError } from "better-auth/api";
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 
-import { publicEnv } from "@/lib/env";
-import { createSupabaseServerClient } from "@/lib/supabase/server";
+import { passwordProblem } from "@/lib/password";
 import { safeNextPath } from "@/lib/safe-redirect";
+import { auth } from "@/server/better-auth";
 
 export type AuthFormState = { error?: string; message?: string; email?: string };
 
 const email = z.email("Informe um e-mail válido.").max(254);
-// Espelha supabase/config.toml (mínimo 10, maiúscula, minúscula e número).
-const password = z
-  .string()
-  .min(10, "Use pelo menos 10 caracteres.")
-  .max(72, "Use até 72 caracteres.")
-  .regex(/[a-z]/, "Inclua uma letra minúscula.")
-  .regex(/[A-Z]/, "Inclua uma letra maiúscula.")
-  .regex(/\d/, "Inclua um número.");
+const password = z.string().superRefine((value, ctx) => {
+  const problem = passwordProblem(value);
+  if (problem) ctx.addIssue({ code: "custom", message: problem });
+});
+
+function apiStatus(err: unknown): number | null {
+  return err instanceof APIError ? Number(err.statusCode) : null;
+}
 
 export async function signIn(_: AuthFormState, form: FormData): Promise<AuthFormState> {
   const parsed = z
     .object({ email, password: z.string().min(1, "Informe a senha."), next: z.string().optional() })
-    .safeParse({
-      email: form.get("email"),
-      password: form.get("password"),
-      next: form.get("next") ?? undefined,
-    });
+    .safeParse({ email: form.get("email"), password: form.get("password"), next: form.get("next") ?? undefined });
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, email: String(form.get("email") ?? "") };
   }
-
-  const supabase = await createSupabaseServerClient();
-  const { error } = await supabase.auth.signInWithPassword({
-    email: parsed.data.email,
-    password: parsed.data.password,
-  });
-  if (error) {
-    const message =
-      error.code === "email_not_confirmed"
-        ? "Confirme seu e-mail antes de entrar."
-        : error.status === 429
-          ? "Muitas tentativas. Aguarde alguns minutos."
-          : "E-mail ou senha incorretos.";
-    return { error: message, email: parsed.data.email };
+  try {
+    await auth.api.signInEmail({
+      body: { email: parsed.data.email, password: parsed.data.password },
+      headers: await headers(),
+    });
+  } catch (err) {
+    const status = apiStatus(err);
+    return {
+      error: status === 429 ? "Muitas tentativas. Aguarde alguns minutos." : "E-mail ou senha incorretos.",
+      email: parsed.data.email,
+    };
   }
   redirect(safeNextPath(parsed.data.next));
 }
 
 export async function signUp(_: AuthFormState, form: FormData): Promise<AuthFormState> {
-  if (process.env.ALLOW_SIGNUP !== "true") {
-    return { error: "O cadastro está desativado." };
-  }
+  if (process.env.ALLOW_SIGNUP !== "true") return { error: "O cadastro está desativado." };
   const parsed = z
     .object({ email, password, confirm: z.string() })
     .refine((v) => v.password === v.confirm, { message: "As senhas não conferem.", path: ["confirm"] })
@@ -59,62 +52,69 @@ export async function signUp(_: AuthFormState, form: FormData): Promise<AuthForm
   if (!parsed.success) {
     return { error: parsed.error.issues[0].message, email: String(form.get("email") ?? "") };
   }
-
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.signUp({
-    email: parsed.data.email,
-    password: parsed.data.password,
-    options: { emailRedirectTo: `${publicEnv().NEXT_PUBLIC_SITE_URL}/auth/callback` },
-  });
-  if (error) {
+  try {
+    await auth.api.signUpEmail({
+      body: { email: parsed.data.email, password: parsed.data.password, name: parsed.data.email.split("@")[0] },
+      headers: await headers(),
+    });
+  } catch (err) {
+    const status = apiStatus(err);
     return {
-      error: error.code === "weak_password" ? "Senha fraca. Escolha outra." : "Não foi possível criar a conta.",
+      error: status === 429 ? "Muitas tentativas. Aguarde." : "Não foi possível criar a conta com esses dados.",
       email: parsed.data.email,
     };
   }
-  if (data.session) redirect("/");
-  return { message: "Enviamos um link de confirmação para o seu e-mail." };
+  redirect("/");
 }
 
 export async function requestPasswordReset(_: AuthFormState, form: FormData): Promise<AuthFormState> {
   const parsed = email.safeParse(form.get("email"));
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-
-  const supabase = await createSupabaseServerClient();
-  await supabase.auth.resetPasswordForEmail(parsed.data, {
-    redirectTo: `${publicEnv().NEXT_PUBLIC_SITE_URL}/auth/callback?next=/redefinir-senha`,
-  });
+  try {
+    await auth.api.requestPasswordReset({
+      body: { email: parsed.data, redirectTo: "/redefinir-senha" },
+      headers: await headers(),
+    });
+  } catch (err) {
+    if (apiStatus(err) === 429) return { error: "Muitas tentativas. Aguarde alguns minutos." };
+    console.error("[auth] falha ao pedir redefinição de senha");
+  }
   // Mesma resposta exista ou não a conta, para não revelar e-mails cadastrados.
   return { message: "Se o e-mail estiver cadastrado, você vai receber um link para criar uma nova senha." };
 }
 
-export async function updatePassword(_: AuthFormState, form: FormData): Promise<AuthFormState> {
+export async function resetPassword(_: AuthFormState, form: FormData): Promise<AuthFormState> {
   const parsed = z
-    .object({ password, confirm: z.string() })
+    .object({ token: z.string().min(1), password, confirm: z.string() })
     .refine((v) => v.password === v.confirm, { message: "As senhas não conferem." })
-    .safeParse({ password: form.get("password"), confirm: form.get("confirm") });
+    .safeParse({ token: form.get("token"), password: form.get("password"), confirm: form.get("confirm") });
   if (!parsed.success) return { error: parsed.error.issues[0].message };
-
-  const supabase = await createSupabaseServerClient();
-  const { data } = await supabase.auth.getClaims();
-  if (!data?.claims?.sub) return { error: "O link expirou. Peça um novo." };
-
-  const { error } = await supabase.auth.updateUser({ password: parsed.data.password });
-  if (error) {
-    return {
-      error:
-        error.code === "same_password"
-          ? "A nova senha precisa ser diferente da atual."
-          : error.code === "reauthentication_needed"
-            ? "Por segurança, entre novamente antes de trocar a senha."
-            : "Não foi possível alterar a senha.",
-    };
+  try {
+    await auth.api.resetPassword({ body: { token: parsed.data.token, newPassword: parsed.data.password } });
+  } catch {
+    return { error: "O link expirou ou já foi usado. Peça um novo." };
   }
-  redirect("/?senha=alterada");
+  redirect("/login?senha=alterada");
+}
+
+export async function changePassword(_: AuthFormState, form: FormData): Promise<AuthFormState> {
+  const parsed = z
+    .object({ current: z.string().min(1, "Informe a senha atual."), password, confirm: z.string() })
+    .refine((v) => v.password === v.confirm, { message: "As senhas não conferem." })
+    .safeParse({ current: form.get("current"), password: form.get("password"), confirm: form.get("confirm") });
+  if (!parsed.success) return { error: parsed.error.issues[0].message };
+  try {
+    await auth.api.changePassword({
+      body: { currentPassword: parsed.data.current, newPassword: parsed.data.password, revokeOtherSessions: true },
+      headers: await headers(),
+    });
+  } catch {
+    return { error: "Senha atual incorreta." };
+  }
+  return { message: "Senha alterada. As outras sessões foram encerradas." };
 }
 
 export async function signOut(): Promise<void> {
-  const supabase = await createSupabaseServerClient();
-  await supabase.auth.signOut();
+  await auth.api.signOut({ headers: await headers() });
   redirect("/login");
 }

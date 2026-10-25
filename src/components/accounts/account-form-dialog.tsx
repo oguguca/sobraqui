@@ -22,7 +22,7 @@ import { ACCOUNT_TYPE_LABEL } from "@/domain/labels";
 import { centsToInput } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
 import { accountSchema, type AccountInput, type AccountValues } from "@/lib/schemas";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { createAccount, updateAccount } from "@/server/actions/accounts";
 
 export function AccountFormDialog({

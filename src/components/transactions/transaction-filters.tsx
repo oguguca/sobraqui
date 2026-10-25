@@ -89,7 +89,7 @@ export function TransactionFilters({ options }: { options: FormOptions }) {
         {select(
           "category",
           "Todas as categorias",
-          options.categories.map((c) => ({ value: c.id, label: c.name })),
+          [{ value: "none", label: "Sem categoria" }, ...options.categories.map((c) => ({ value: c.id, label: c.name }))],
         )}
         {select(
           "account",

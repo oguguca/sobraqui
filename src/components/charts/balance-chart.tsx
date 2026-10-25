@@ -10,19 +10,29 @@ import { ChartTooltipBox, compactMoney } from "./chart-tooltip";
 const LINE = "var(--chart-balance)";
 
 /** Saldo no fim de cada dia. Série única: o título do card a identifica. */
-export function BalanceChart({ data, height = 220 }: { data: BalancePoint[]; height?: number }) {
+export function BalanceChart({
+  data,
+  height = 220,
+  compact = false,
+}: {
+  data: BalancePoint[];
+  height?: number;
+  /** Sem eixos nem grade (cartões pequenos); o tooltip mostra os valores. */
+  compact?: boolean;
+}) {
   return (
     <div style={{ height }} role="img" aria-label="Gráfico da evolução do saldo">
       <ResponsiveContainer width="100%" height="100%">
-        <AreaChart data={data} margin={{ top: 8, right: 8, bottom: 0, left: 0 }}>
+        <AreaChart data={data} margin={compact ? { top: 8, right: 0, bottom: 0, left: 0 } : { top: 8, right: 8, bottom: 0, left: 0 }}>
           <defs>
             <linearGradient id="balance-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={LINE} stopOpacity={0.12} />
+              <stop offset="0%" stopColor={LINE} stopOpacity={compact ? 0.25 : 0.12} />
               <stop offset="100%" stopColor={LINE} stopOpacity={0} />
             </linearGradient>
           </defs>
-          <CartesianGrid vertical={false} stroke="var(--chart-grid)" />
+          {!compact && <CartesianGrid vertical={false} stroke="var(--chart-grid)" />}
           <XAxis
+            hide={compact}
             dataKey="date"
             tickFormatter={formatDateShort}
             tickLine={false}
@@ -32,6 +42,7 @@ export function BalanceChart({ data, height = 220 }: { data: BalancePoint[]; hei
             stroke="var(--muted-foreground)"
           />
           <YAxis
+            hide={compact}
             tickFormatter={compactMoney}
             tickLine={false}
             axisLine={false}

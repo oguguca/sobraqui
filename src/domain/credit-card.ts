@@ -120,3 +120,17 @@ export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
   paid: "Paga",
   empty: "Sem lançamentos",
 };
+
+/**
+ * Ciclo da fatura aberta hoje: do último fechamento (compras desse dia já
+ * entram nela) até o vencimento dela. É o período padrão das sincronizações.
+ */
+export function openInvoiceCycle(
+  today: ISODate,
+  closingDay: number,
+  dueDay: number,
+): { from: ISODate; to: ISODate; closingDate: ISODate; dueDate: ISODate } {
+  const open = invoiceForPurchase(today, closingDay, dueDay);
+  const previous = invoiceDatesFor(addMonthsToMonth(monthOf(open.referenceMonth), -1), closingDay, dueDay);
+  return { from: previous.closingDate, to: open.dueDate, closingDate: open.closingDate, dueDate: open.dueDate };
+}

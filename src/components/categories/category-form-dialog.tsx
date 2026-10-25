@@ -22,7 +22,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { CATEGORY_KIND_LABEL } from "@/domain/labels";
 import { useServerAction } from "@/hooks/use-server-action";
 import { categorySchema, type CategoryInput, type CategoryValues } from "@/lib/schemas";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
 import { createCategory, updateCategory } from "@/server/actions/categories";
 

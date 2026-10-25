@@ -16,6 +16,7 @@ export function StatCard({
   upIsGood,
   tone,
   hint,
+  children,
 }: {
   label: string;
   cents: number;
@@ -23,6 +24,8 @@ export function StatCard({
   upIsGood: boolean;
   tone?: "auto" | "positive" | "negative";
   hint?: string;
+  /** Detalhe extra abaixo da variação. */
+  children?: React.ReactNode;
 }) {
   const direction = change === null || Math.abs(change) < 0.0005 ? "flat" : change > 0 ? "up" : "down";
   const good = direction === "flat" ? null : (direction === "up") === upIsGood;
@@ -53,6 +56,7 @@ export function StatCard({
             </>
           )}
         </p>
+        {children}
       </CardContent>
     </Card>
   );

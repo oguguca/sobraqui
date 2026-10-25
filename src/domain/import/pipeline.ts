@@ -14,6 +14,7 @@ import {
   type ImportAction,
   type ImportFormat,
   type ImportTarget,
+  type PaymentMethod,
   type PreviewRow,
   type RawRecord,
   type RowError,
@@ -117,6 +118,7 @@ export function classify(
   record: RawRecord,
   target: ImportTarget,
 ): { action: ImportAction; suggestion: string | null } {
+  if (record.hints?.action) return { action: record.hints.action, suggestion: record.hints.suggestion ?? null };
   const d = normalizeText(record.description);
   const incoming = record.signedCents > 0;
 
@@ -148,6 +150,18 @@ function transferHint(d: string): string | null {
   if (/transferencia (enviada|recebida)|pix (enviado|recebido)/.test(d)) {
     return "Se for entre suas próprias contas, ignore aqui e registre como transferência.";
   }
+  return null;
+}
+
+/** Forma de pagamento de uma saída, pelo texto que o banco usa. */
+export function suggestPaymentMethod(description: string, target: ImportTarget): PaymentMethod | null {
+  if (target === "card") return "credit_card";
+  const d = normalizeText(description);
+  if (/\bpix\b/.test(d)) return "pix";
+  if (/debito/.test(d)) return "debit_card";
+  if (/boleto/.test(d)) return "boleto";
+  if (/\b(ted|doc)\b|transferencia/.test(d)) return "transfer";
+  if (/saque/.test(d)) return "cash";
   return null;
 }
 
@@ -206,6 +220,12 @@ export function buildPreview(
     }
     return {
       ...record,
+      paymentMethod:
+        record.signedCents < 0
+          ? record.hints?.paymentMethod !== undefined
+            ? record.hints.paymentMethod
+            : suggestPaymentMethod(record.description, target)
+          : null,
       index,
       amountCents,
       dedupeKey: keys[index],

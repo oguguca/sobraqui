@@ -1,10 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 
+import { AuthForm } from "@/components/auth/auth-form";
 import { ProfileForm } from "@/components/settings/profile-form";
+import { ResetEverything } from "@/components/settings/reset-everything";
 import { PageHeader } from "@/components/shared";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { changePassword } from "@/server/actions/auth";
 import { requireAuth } from "@/server/auth";
 
 export const metadata: Metadata = { title: "Configurações" };
@@ -30,11 +31,28 @@ export default async function SettingsPage() {
             <CardDescription>Conectado como {user.email ?? "—"}.</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button variant="outline" asChild>
-              <Link href="/redefinir-senha">Trocar senha</Link>
-            </Button>
+            <div className="max-w-md">
+              <AuthForm
+                bare
+                title="Trocar senha"
+                submitLabel="Trocar senha"
+                action={changePassword}
+                fields={[
+                  { name: "current", label: "Senha atual", type: "password", autoComplete: "current-password" },
+                  {
+                    name: "password",
+                    label: "Nova senha",
+                    type: "password",
+                    autoComplete: "new-password",
+                    hint: "Mínimo de 10 caracteres, com maiúscula, minúscula e número.",
+                  },
+                  { name: "confirm", label: "Confirme a nova senha", type: "password", autoComplete: "new-password" },
+                ]}
+              />
+            </div>
           </CardContent>
         </Card>
+        <ResetEverything />
       </div>
     </>
   );

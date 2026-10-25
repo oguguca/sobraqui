@@ -19,13 +19,14 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
-import { FREQUENCY_LABEL } from "@/domain/labels";
+import { FREQUENCY_LABEL, PAYMENT_METHOD_LABEL, PAYMENT_METHODS } from "@/domain/labels";
 import { formatMoney, parseMoney } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
 import {
   transactionFormSchema,
   type TransactionFormInput,
   type TransactionFormValues,
+  usesCreditCard,
 } from "@/lib/transaction-schema";
 import { createTransaction } from "@/server/actions/transactions";
 import type { FormOptions } from "@/server/queries/core";
@@ -46,11 +47,16 @@ export function TransactionFormDialog({
   today,
   trigger,
   defaults,
+  lockMode = false,
+  title = "Novo lançamento",
 }: {
   options: FormOptions;
   today: string;
   trigger: React.ReactNode;
   defaults?: Partial<TransactionFormInput>;
+  /** Esconde a escolha de tipo (abas Entradas e Saídas). */
+  lockMode?: boolean;
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const { run, pending, fieldErrors } = useServerAction(createTransaction);
@@ -63,6 +69,7 @@ export function TransactionFormDialog({
     categoryId: "",
     notes: "",
     source: "account",
+    paymentMethod: "pix",
     accountId: options.accounts[0]?.id ?? "",
     destinationAccountId: "",
     cardId: options.cards[0]?.id ?? "",
@@ -76,11 +83,11 @@ export function TransactionFormDialog({
     resolver: zodResolver(transactionFormSchema),
     defaultValues: initial,
   });
-  const [mode, source, installments, amount] = useWatch({
+  const [mode, source, installments, amount, paymentMethod, status] = useWatch({
     control: form.control,
-    name: ["mode", "source", "installments", "amount"],
+    name: ["mode", "source", "installments", "amount", "paymentMethod", "status"],
   });
-  const usesCard = (mode === "expense" || mode === "refund") && source === "card";
+  const usesCard = usesCreditCard({ mode, source, paymentMethod });
   const categoryKind = mode === "income" ? "income" : mode === "transfer" ? "transfer" : "expense";
   const categories = options.categories.filter((c) => c.kind === categoryKind);
   const errors = form.formState.errors;
@@ -111,14 +118,21 @@ export function TransactionFormDialog({
       <DialogTrigger asChild>{trigger}</DialogTrigger>
       <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
-          <DialogTitle>Novo lançamento</DialogTitle>
-          <DialogDescription>Transferências entre suas contas não contam como receita nem despesa.</DialogDescription>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>
+            {mode === "income"
+              ? "Salário, freelance, reembolsos e outros valores que entraram."
+              : mode === "expense"
+                ? "No crédito, a compra entra na fatura do cartão; nas outras formas, sai da conta."
+                : "Transferências entre suas contas não contam como receita nem despesa."}
+          </DialogDescription>
         </DialogHeader>
 
         {noAccounts && options.cards.length === 0 ? (
           <p className="text-sm text-muted-foreground">Cadastre uma conta ou um cartão antes de lançar.</p>
         ) : (
           <form onSubmit={onSubmit} className="grid gap-4" noValidate>
+            {!lockMode && (
             <Controller
               control={form.control}
               name="mode"
@@ -142,9 +156,12 @@ export function TransactionFormDialog({
                 </Tabs>
               )}
             />
+            )}
 
             <FormField id="tx-description" label="Descrição" error={err("description")}>
-              <Input id="tx-description" placeholder="Ex.: Mercado" autoComplete="off" {...form.register("description")} />
+              <Input
+                id="tx-description"
+                placeholder={mode === "income" ? "Ex.: Salário, freelance" : "Ex.: Mercado"} autoComplete="off" {...form.register("description")} />
             </FormField>
 
             <div className="grid gap-4 sm:grid-cols-2">
@@ -153,14 +170,64 @@ export function TransactionFormDialog({
               </FormField>
               <FormField
                 id="tx-date"
-                label={usesCard ? "Data da compra" : "Data"}
+                label={usesCard ? "Data da compra" : status === "pending" ? "Vencimento" : "Data"}
                 error={err("occurredOn")}
               >
                 <Input id="tx-date" type="date" {...form.register("occurredOn")} />
               </FormField>
             </div>
 
-            {(mode === "expense" || mode === "refund") && options.cards.length > 0 && (
+            {mode === "expense" && (
+              <FormField
+                id="tx-method"
+                label="Forma de pagamento"
+                error={err("paymentMethod")}
+                hint={
+                  paymentMethod === "credit_card" && options.cards.length === 0
+                    ? "Cadastre um cartão em Cartões para lançar no crédito."
+                    : paymentMethod === "boleto"
+                      ? "Boleto ainda não pago? Marque a situação como “A pagar” e use a data do vencimento."
+                      : undefined
+                }
+              >
+                <Controller
+                  control={form.control}
+                  name="paymentMethod"
+                  render={({ field }) => (
+                    <Select
+                      value={field.value}
+                      onValueChange={(v) => {
+                        field.onChange(v);
+                        if (v === "credit_card") {
+                          form.setValue("repeat", "none");
+                          form.setValue("status", "paid");
+                        } else {
+                          form.setValue("installments", 1);
+                        }
+                        if (v === "boleto") form.setValue("status", "pending");
+                      }}
+                    >
+                      <SelectTrigger id="tx-method" className="w-full">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {PAYMENT_METHODS.map((m) => (
+                          <SelectItem
+                            key={m}
+                            value={m}
+                            disabled={(m === "credit_card" && options.cards.length === 0) || (m !== "credit_card" && noAccounts)}
+                          >
+                            {PAYMENT_METHOD_LABEL[m]}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+              </FormField>
+            )}
+
+            {mode === "refund" && options.cards.length > 0 && (
               <FormField id="tx-source" label="Pago com">
                 <Controller
                   control={form.control}

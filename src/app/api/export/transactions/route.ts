@@ -3,7 +3,7 @@ import { NextResponse, type NextRequest } from "next/server";
 import { buildLookups } from "@/components/transactions/lookups";
 import { csvAmount, toCsv } from "@/domain/csv-export";
 import { formatDate, todayIn } from "@/domain/dates";
-import { TRANSACTION_KIND_LABEL, TRANSACTION_STATUS_LABEL } from "@/domain/labels";
+import { PAYMENT_METHOD_LABEL, TRANSACTION_KIND_LABEL, TRANSACTION_STATUS_LABEL } from "@/domain/labels";
 import { getAuth } from "@/server/auth";
 import { listAccounts, listCards, listCategories } from "@/server/queries/core";
 import { allFilteredTransactions, parseTransactionFilters } from "@/server/queries/transactions";
@@ -28,6 +28,7 @@ export async function GET(request: NextRequest) {
       "Descrição",
       "Tipo",
       "Situação",
+      "Forma de pagamento",
       "Valor (R$)",
       "Categoria",
       "Conta",
@@ -42,6 +43,7 @@ export async function GET(request: NextRequest) {
       t.description,
       TRANSACTION_KIND_LABEL[t.kind],
       TRANSACTION_STATUS_LABEL[t.status],
+      t.payment_method ? PAYMENT_METHOD_LABEL[t.payment_method] : "",
       // Entradas positivas, saídas negativas; transferências com o valor movido (positivo).
       csvAmount(t.kind === "expense" || t.kind === "invoice_payment" ? -t.amount_cents : t.amount_cents),
       t.category_id ? (lookups.categories[t.category_id]?.name ?? "") : "",

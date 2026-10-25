@@ -1,10 +1,12 @@
 import "server-only";
 
+import { headers } from "next/headers";
 import { redirect } from "next/navigation";
 import { cache } from "react";
 
 import { DEFAULT_TIMEZONE } from "@/domain/dates";
-import { createSupabaseServerClient, type AppSupabaseClient } from "@/lib/supabase/server";
+import { auth } from "@/server/better-auth";
+import { withUser, type Tx } from "@/server/db";
 
 export type SessionUser = {
   id: string;
@@ -13,29 +15,26 @@ export type SessionUser = {
   timezone: string;
 };
 
-export type AuthContext = { user: SessionUser; supabase: AppSupabaseClient };
+export type AuthContext = {
+  user: SessionUser;
+  /** Executa consultas com o RLS do usuário (ver withUser). */
+  db: <T>(fn: (tx: Tx) => Promise<T>, options?: { timeoutMs?: number }) => Promise<T>;
+};
 
-/**
- * Usuário da requisição, com o JWT validado pelo Supabase (getClaims verifica
- * assinatura e expiração). Memorizado por requisição.
- */
+/** Usuário da requisição, com a sessão validada no banco. Memorizado por requisição. */
 export const getAuth = cache(async (): Promise<AuthContext | null> => {
-  const supabase = await createSupabaseServerClient();
-  const { data, error } = await supabase.auth.getClaims();
-  const claims = data?.claims;
-  if (error || !claims?.sub) return null;
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("display_name, timezone")
-    .eq("id", claims.sub)
-    .maybeSingle();
-
+  const session = await auth.api.getSession({ headers: await headers() });
+  if (!session) return null;
+  const userId = session.user.id;
+  const db: AuthContext["db"] = (fn, options) => withUser(userId, fn, options);
+  const profile = await db((tx) =>
+    tx.profile.findUnique({ where: { id: userId }, select: { display_name: true, timezone: true } }),
+  );
   return {
-    supabase,
+    db,
     user: {
-      id: claims.sub,
-      email: typeof claims.email === "string" ? claims.email : null,
+      id: userId,
+      email: session.user.email ?? null,
       displayName: profile?.display_name ?? null,
       timezone: profile?.timezone ?? DEFAULT_TIMEZONE,
     },
@@ -44,7 +43,7 @@ export const getAuth = cache(async (): Promise<AuthContext | null> => {
 
 /** Para páginas: sem sessão, vai para o login. */
 export async function requireAuth(): Promise<AuthContext> {
-  const auth = await getAuth();
-  if (!auth) redirect("/login");
-  return auth;
+  const ctx = await getAuth();
+  if (!ctx) redirect("/login");
+  return ctx;
 }

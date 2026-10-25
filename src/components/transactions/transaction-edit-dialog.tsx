@@ -16,9 +16,10 @@ import {
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { PAYMENT_METHOD_LABEL, PAYMENT_METHODS } from "@/domain/labels";
 import { centsToInput } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import {
   transactionUpdateSchema,
   type TransactionUpdateInput,
@@ -52,6 +53,7 @@ export function TransactionEditDialog({
       categoryId: t.category_id ?? "",
       notes: t.notes ?? "",
       status: t.status,
+      paymentMethod: t.payment_method === "credit_card" ? null : t.payment_method,
     },
   });
   const errors = form.formState.errors;
@@ -111,6 +113,28 @@ export function TransactionEditDialog({
                       {categories.map(([id, c]) => (
                         <SelectItem key={id} value={id}>
                           {c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+            </FormField>
+          )}
+          {t.kind === "expense" && !onCard && (
+            <FormField id="edit-method" label="Forma de pagamento">
+              <Controller
+                control={form.control}
+                name="paymentMethod"
+                render={({ field }) => (
+                  <Select value={field.value ?? "other"} onValueChange={field.onChange}>
+                    <SelectTrigger id="edit-method" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PAYMENT_METHODS.filter((m) => m !== "credit_card").map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {PAYMENT_METHOD_LABEL[m]}
                         </SelectItem>
                       ))}
                     </SelectContent>

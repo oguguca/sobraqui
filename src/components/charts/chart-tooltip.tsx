@@ -24,15 +24,7 @@ export function ChartTooltipBox({ title, rows }: { title: string; rows: TooltipR
   );
 }
 
-/** Eixo Y compacto: R$ 1,2 mil / R$ 3 mi. */
-export function compactMoney(cents: number): string {
-  return new Intl.NumberFormat("pt-BR", {
-    style: "currency",
-    currency: "BRL",
-    notation: "compact",
-    maximumFractionDigits: 1,
-  }).format(cents / 100);
-}
+export { compactMoney } from "@/domain/money";
 
 export function ChartLegend({ items }: { items: { label: string; color: string }[] }) {
   return (

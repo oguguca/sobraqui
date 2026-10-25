@@ -2,49 +2,43 @@ import "server-only";
 
 import { invoiceForPurchase, type InvoiceDates } from "@/domain/credit-card";
 import type { ISODate } from "@/domain/dates";
-import { ActionError, check } from "@/server/action";
-import type { AuthContext } from "@/server/auth";
+import { ActionError } from "@/server/action";
+import { dbDate, type Tx } from "@/server/db";
 
 export type CardRules = { id: string; closing_day: number; due_day: number; archived_at: string | null };
 
-export async function getCardRules({ supabase }: AuthContext, cardId: string): Promise<CardRules> {
-  const { data } = await supabase
-    .from("credit_cards")
-    .select("id, closing_day, due_day, archived_at")
-    .eq("id", cardId)
-    .maybeSingle();
-  if (!data) throw new ActionError("Cartão não encontrado.");
-  return data;
+export async function getCardRules(tx: Tx, userId: string, cardId: string): Promise<CardRules> {
+  const card = await tx.creditCard.findFirst({
+    where: { id: cardId, user_id: userId },
+    select: { id: true, closing_day: true, due_day: true, archived_at: true },
+  });
+  if (!card) throw new ActionError("Cartão não encontrado.");
+  return card;
 }
 
 /** Garante que as faturas existem e devolve o id de cada uma, na mesma ordem. */
 export async function ensureInvoices(
-  { supabase }: AuthContext,
+  tx: Tx,
+  userId: string,
   cardId: string,
   invoices: InvoiceDates[],
 ): Promise<string[]> {
   const unique = [...new Map(invoices.map((i) => [i.referenceMonth, i])).values()];
-  const { error } = await supabase.from("credit_card_invoices").upsert(
-    unique.map((i) => ({
+  await tx.creditCardInvoice.createMany({
+    data: unique.map((i) => ({
+      user_id: userId,
       credit_card_id: cardId,
-      reference_month: i.referenceMonth,
-      closing_date: i.closingDate,
-      due_date: i.dueDate,
+      reference_month: dbDate(i.referenceMonth),
+      closing_date: dbDate(i.closingDate),
+      due_date: dbDate(i.dueDate),
     })),
-    { onConflict: "credit_card_id,reference_month", ignoreDuplicates: true },
-  );
-  check(error, "criar a fatura");
-
-  const { data, error: selectError } = await supabase
-    .from("credit_card_invoices")
-    .select("id, reference_month")
-    .eq("credit_card_id", cardId)
-    .in(
-      "reference_month",
-      unique.map((i) => i.referenceMonth),
-    );
-  check(selectError, "carregar a fatura");
-  const byMonth = new Map((data ?? []).map((row) => [row.reference_month, row.id]));
+    skipDuplicates: true,
+  });
+  const rows = await tx.creditCardInvoice.findMany({
+    where: { user_id: userId, credit_card_id: cardId, reference_month: { in: unique.map((i) => dbDate(i.referenceMonth)) } },
+    select: { id: true, reference_month: true },
+  });
+  const byMonth = new Map(rows.map((r) => [r.reference_month, r.id]));
   return invoices.map((i) => {
     const id = byMonth.get(i.referenceMonth);
     if (!id) throw new ActionError("Não foi possível localizar a fatura.");
@@ -52,7 +46,7 @@ export async function ensureInvoices(
   });
 }
 
-export async function invoiceIdForPurchase(ctx: AuthContext, card: CardRules, date: ISODate): Promise<string> {
-  const [id] = await ensureInvoices(ctx, card.id, [invoiceForPurchase(date, card.closing_day, card.due_day)]);
+export async function invoiceIdForPurchase(tx: Tx, userId: string, card: CardRules, date: ISODate): Promise<string> {
+  const [id] = await ensureInvoices(tx, userId, card.id, [invoiceForPurchase(date, card.closing_day, card.due_day)]);
   return id;
 }

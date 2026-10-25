@@ -78,3 +78,18 @@ describe("status da fatura", () => {
     expect(invoiceStatus(invoice, { charges_cents: 0, refunds_cents: 0, paid_cents: 0 }, "2026-10-20")).toBe("empty");
   });
 });
+
+describe("ciclo da fatura aberta", () => {
+  it("vai do último fechamento até o vencimento da fatura aberta", async () => {
+    const { openInvoiceCycle } = await import("@/domain/credit-card");
+    // Nubank: fecha dia 7, vence dia 14. Hoje 24/10 -> fatura que fecha 07/11.
+    expect(openInvoiceCycle("2026-10-24", 7, 14)).toEqual({
+      from: "2026-10-07",
+      to: "2026-11-14",
+      closingDate: "2026-11-07",
+      dueDate: "2026-11-14",
+    });
+    // No próprio dia do fechamento, a fatura aberta já é a seguinte.
+    expect(openInvoiceCycle("2026-11-07", 7, 14).from).toBe("2026-11-07");
+  });
+});

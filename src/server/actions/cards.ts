@@ -2,10 +2,14 @@
 
 import { z } from "zod";
 
-import { invoiceAmount } from "@/domain/credit-card";
+import { invoiceAmount, invoiceDatesFor } from "@/domain/credit-card";
+import { monthOf, todayIn } from "@/domain/dates";
 import { cardSchema, invoicePaymentSchema } from "@/lib/schemas";
-import { idInput } from "@/lib/validation";
-import { ActionError, authedAction, check, found } from "@/server/action";
+import { idInput, moneyInput, uuid } from "@/lib/validation";
+import { ActionError, affected, authedAction, found } from "@/server/action";
+import { dbDate } from "@/server/db";
+import { recomputeInvoiceAdjustment } from "@/server/invoice-adjustment";
+import { invoiceTotals } from "@/server/queries/cards";
 
 function toRow(input: z.output<typeof cardSchema>) {
   return {
@@ -21,46 +25,58 @@ function toRow(input: z.output<typeof cardSchema>) {
 
 export const createCard = authedAction(
   cardSchema,
-  async (input, { supabase }) => {
-    const { data, error } = await supabase.from("credit_cards").insert(toRow(input)).select("id").single();
-    check(error, "criar o cartão");
-    return found(data);
-  },
+  async (input, { db, user }) =>
+    db((tx) => tx.creditCard.create({ data: { ...toRow(input), user_id: user.id }, select: { id: true } })),
   { message: "Cartão criado." },
 );
 
-/** Novos dias de fechamento/vencimento valem para faturas futuras; as já criadas mantêm as datas. */
+/**
+ * Novos dias de fechamento/vencimento valem para a fatura aberta e as futuras
+ * (recalcula as datas delas). Faturas já fechadas mantêm as datas reais.
+ */
 export const updateCard = authedAction(
   cardSchema.extend({ id: z.uuid() }),
-  async ({ id, ...input }, { supabase }) => {
-    const { data, error } = await supabase.from("credit_cards").update(toRow(input)).eq("id", id).select("id").maybeSingle();
-    check(error, "salvar o cartão");
-    return found(data, "Cartão");
-  },
+  async ({ id, ...input }, { db, user }) =>
+    db(async (tx) => {
+      affected(await tx.creditCard.updateMany({ where: { id, user_id: user.id }, data: toRow(input) }), "Cartão");
+      const today = todayIn(user.timezone);
+      const open = await tx.creditCardInvoice.findMany({
+        where: { user_id: user.id, credit_card_id: id, closing_date: { gte: dbDate(today) } },
+        select: { id: true, reference_month: true },
+      });
+      for (const inv of open) {
+        const dates = invoiceDatesFor(monthOf(inv.reference_month), input.closingDay, input.dueDay);
+        await tx.creditCardInvoice.update({
+          where: { id: inv.id },
+          data: { closing_date: dbDate(dates.closingDate), due_date: dbDate(dates.dueDate) },
+        });
+      }
+      return { updatedInvoices: open.length };
+    }),
   { message: "Cartão atualizado." },
 );
 
 export const setCardArchived = authedAction(
   idInput.extend({ archived: z.boolean() }),
-  async ({ id, archived }, { supabase }) => {
-    const { data, error } = await supabase
-      .from("credit_cards")
-      .update({ archived_at: archived ? new Date().toISOString() : null })
-      .eq("id", id)
-      .select("id")
-      .maybeSingle();
-    check(error, "arquivar o cartão");
-    return found(data, "Cartão");
-  },
+  async ({ id, archived }, { db, user }) =>
+    affected(
+      await db((tx) =>
+        tx.creditCard.updateMany({ where: { id, user_id: user.id }, data: { archived_at: archived ? new Date() : null } }),
+      ),
+      "Cartão",
+    ),
 );
 
 export const deleteCard = authedAction(
   idInput,
-  async ({ id }, { supabase }) => {
-    const { data, error } = await supabase.from("credit_cards").delete().eq("id", id).select("id").maybeSingle();
-    check(error, "excluir o cartão");
-    return found(data, "Cartão");
-  },
+  async ({ id }, { db, user }) =>
+    db(async (tx) => {
+      if ((await tx.transaction.count({ where: { user_id: user.id, credit_card_id: id } })) > 0) {
+        throw new ActionError("Este cartão tem lançamentos. Arquive-o para manter o histórico.");
+      }
+      await tx.creditCardInvoice.deleteMany({ where: { user_id: user.id, credit_card_id: id } });
+      return affected(await tx.creditCard.deleteMany({ where: { id, user_id: user.id } }), "Cartão");
+    }),
   { message: "Cartão excluído." },
 );
 
@@ -71,46 +87,63 @@ export const deleteCard = authedAction(
  */
 export const payInvoice = authedAction(
   invoicePaymentSchema,
-  async (input, { supabase }) => {
-    const { data: invoice } = await supabase
-      .from("credit_card_invoices")
-      .select("id, credit_card_id, reference_month")
-      .eq("id", input.invoiceId)
-      .maybeSingle();
-    if (!invoice) throw new ActionError("Fatura não encontrada.");
+  async (input, { db, user }) =>
+    db(async (tx) => {
+      const userId = user.id;
+      const invoice = found(
+        await tx.creditCardInvoice.findFirst({
+          where: { id: input.invoiceId, user_id: userId },
+          include: { credit_card: { select: { name: true } } },
+        }),
+        "Fatura",
+      );
+      const account = found(
+        await tx.bankAccount.findFirst({ where: { id: input.accountId, user_id: userId }, select: { archived_at: true } }),
+        "Conta",
+      );
+      if (account.archived_at) throw new ActionError("Esta conta está arquivada.");
 
-    const { data: account } = await supabase
-      .from("accounts")
-      .select("id, archived_at")
-      .eq("id", input.accountId)
-      .maybeSingle();
-    if (!account) throw new ActionError("Conta não encontrada.");
-    if (account.archived_at) throw new ActionError("Esta conta está arquivada.");
+      const totals = (await invoiceTotals(tx, userId, [invoice.id])).get(invoice.id);
+      const remaining = totals ? invoiceAmount(totals) - totals.paid_cents : 0;
+      if (remaining <= 0) throw new ActionError("Esta fatura não tem saldo em aberto.");
+      if (input.amount > remaining) throw new ActionError("O valor é maior que o saldo em aberto da fatura.");
 
-    const { data: totals } = await supabase
-      .from("invoice_totals")
-      .select("charges_cents, refunds_cents, paid_cents")
-      .eq("invoice_id", invoice.id)
-      .maybeSingle();
-    const remaining = totals ? invoiceAmount(totals) - totals.paid_cents : 0;
-    if (remaining <= 0) throw new ActionError("Esta fatura não tem saldo em aberto.");
-    if (input.amount > remaining) throw new ActionError("O valor é maior que o saldo em aberto da fatura.");
-
-    const { data: card } = await supabase.from("credit_cards").select("name").eq("id", invoice.credit_card_id).maybeSingle();
-    const [year, month] = invoice.reference_month.split("-");
-
-    const { error } = await supabase.from("transactions").insert({
-      kind: "invoice_payment",
-      status: "paid",
-      amount_cents: input.amount,
-      occurred_on: input.paidOn,
-      description: `Pagamento da fatura ${card?.name ?? "do cartão"} ${month}/${year}`,
-      account_id: account.id,
-      credit_card_id: invoice.credit_card_id,
-      invoice_id: invoice.id,
-    });
-    check(error, "registrar o pagamento");
-    return { remaining: remaining - input.amount };
-  },
+      const [year, month] = invoice.reference_month.split("-");
+      await tx.transaction.create({
+        data: {
+          user_id: userId,
+          kind: "invoice_payment",
+          status: "paid",
+          amount_cents: input.amount,
+          occurred_on: dbDate(input.paidOn),
+          description: `Pagamento da fatura ${invoice.credit_card.name} ${month}/${year}`,
+          account_id: input.accountId,
+          credit_card_id: invoice.credit_card_id,
+          invoice_id: invoice.id,
+        },
+      });
+      return { remaining: remaining - input.amount };
+    }),
   { message: "Pagamento registrado." },
+);
+
+/**
+ * Valor da fatura conforme o app do banco. A diferença para os lançamentos
+ * vira um ajuste ("juros e encargos"), recalculado a cada sincronização.
+ * Vazio remove o ajuste.
+ */
+export const setInvoiceBankAmount = authedAction(
+  z.object({ invoiceId: uuid, amount: z.union([moneyInput({ allowZero: true }), z.literal("").transform(() => null)]) }),
+  async ({ invoiceId, amount }, { db, user }) =>
+    db(async (tx) => {
+      affected(
+        await tx.creditCardInvoice.updateMany({
+          where: { id: invoiceId, user_id: user.id },
+          data: { bank_amount_cents: amount },
+        }),
+        "Fatura",
+      );
+      return { adjustmentCents: await recomputeInvoiceAdjustment(tx, user.id, invoiceId) };
+    }),
+  { message: "Fatura ajustada ao valor do banco." },
 );

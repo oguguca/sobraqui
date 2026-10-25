@@ -25,19 +25,31 @@ type Props = {
   action: (state: AuthFormState, form: FormData) => Promise<AuthFormState>;
   hidden?: Record<string, string>;
   initialError?: string;
+  initialMessage?: string;
   footer?: React.ReactNode;
+  /** Sem cartão em volta (para usar dentro de outra página). */
+  bare?: boolean;
 };
 
-export function AuthForm({ title, description, submitLabel, fields, action, hidden, initialError, footer }: Props) {
-  const [state, formAction, pending] = useActionState(action, { error: initialError });
-
+export function AuthForm(props: Props) {
+  const content = <AuthFormBody {...props} />;
+  if (props.bare) return content;
   return (
     <Card>
       <CardHeader>
-        <CardTitle className="text-lg">{title}</CardTitle>
-        {description && <CardDescription>{description}</CardDescription>}
+        <CardTitle className="text-lg">{props.title}</CardTitle>
+        {props.description && <CardDescription>{props.description}</CardDescription>}
       </CardHeader>
-      <CardContent>
+      <CardContent>{content}</CardContent>
+    </Card>
+  );
+}
+
+function AuthFormBody({ submitLabel, fields, action, hidden, initialError, initialMessage, footer }: Props) {
+  const [state, formAction, pending] = useActionState(action, { error: initialError, message: initialMessage });
+
+  return (
+    <>
         <form action={formAction} className="grid gap-4" noValidate>
           {hidden &&
             Object.entries(hidden).map(([name, value]) => (
@@ -75,7 +87,6 @@ export function AuthForm({ title, description, submitLabel, fields, action, hidd
           </Button>
         </form>
         {footer && <div className="mt-5 text-center text-sm text-muted-foreground">{footer}</div>}
-      </CardContent>
-    </Card>
+    </>
   );
 }

@@ -1,0 +1,432 @@
+// Sobraqui: esquema do banco (Neon / PostgreSQL).
+//
+// Convenções:
+// * Valores monetários em centavos (BigInt). Nunca ponto flutuante.
+// * Datas de competência em @db.Date; instantes técnicos em timestamptz.
+// * Campos de domínio em snake_case, iguais às colunas.
+// * Toda tabela de domínio tem user_id. Relações usam chaves compostas
+//   (user_id, id): um registro nunca referencia dados de outro usuário.
+// * Regras que o Prisma não modela (CHECKs, RLS, role app_user) ficam no SQL
+//   das migrações. Veja prisma/migrations/*/migration.sql.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ---------------------------------------------------------------------------
+// Autenticação (Better Auth). Nomes de campo seguem o Better Auth.
+// ---------------------------------------------------------------------------
+
+model User {
+  id            String   @id @default(uuid()) @db.Uuid
+  name          String
+  email         String   @unique
+  emailVerified Boolean  @default(false)
+  image         String?
+  createdAt     DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime @updatedAt @db.Timestamptz(3)
+
+  sessions     Session[]
+  authAccounts AuthAccount[]
+  profile      Profile?
+
+  accounts               BankAccount[]
+  categories             Category[]
+  credit_cards           CreditCard[]
+  credit_card_invoices   CreditCardInvoice[]
+  recurring_transactions RecurringTransaction[]
+  import_batches         ImportBatch[]
+  transactions           Transaction[]
+  budgets                Budget[]
+  financial_goals        FinancialGoal[]
+
+  @@map("users")
+}
+
+model Session {
+  id        String   @id @default(uuid()) @db.Uuid
+  expiresAt DateTime @db.Timestamptz(3)
+  token     String   @unique
+  createdAt DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt DateTime @updatedAt @db.Timestamptz(3)
+  ipAddress String?
+  userAgent String?
+  userId    String   @db.Uuid
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+model AuthAccount {
+  id                    String    @id @default(uuid()) @db.Uuid
+  accountId             String
+  providerId            String
+  userId                String    @db.Uuid
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime? @db.Timestamptz(3)
+  refreshTokenExpiresAt DateTime? @db.Timestamptz(3)
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now()) @db.Timestamptz(3)
+  updatedAt             DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([userId])
+  @@map("auth_accounts")
+}
+
+model Verification {
+  id         String   @id @default(uuid()) @db.Uuid
+  identifier String
+  value      String
+  expiresAt  DateTime @db.Timestamptz(3)
+  createdAt  DateTime @default(now()) @db.Timestamptz(3)
+  updatedAt  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@index([identifier])
+  @@map("verifications")
+}
+
+model RateLimit {
+  id          String @id @default(uuid()) @db.Uuid
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+
+  @@map("rate_limits")
+}
+
+// ---------------------------------------------------------------------------
+// Domínio
+// ---------------------------------------------------------------------------
+
+enum account_type {
+  checking
+  payment
+  cash
+  savings
+  investment
+  other
+}
+
+enum category_kind {
+  income
+  expense
+  transfer
+}
+
+/// income: entrada em conta. expense: saída de conta ou compra no cartão.
+/// refund: estorno (reduz despesa). transfer: entre contas próprias.
+/// invoice_payment: pagamento de fatura (não é despesa).
+enum transaction_kind {
+  income
+  expense
+  refund
+  transfer
+  invoice_payment
+}
+
+/// Como uma saída foi paga. Crédito exige cartão; as demais saem de uma conta.
+enum payment_method {
+  pix
+  debit_card
+  credit_card
+  boleto
+  cash
+  transfer
+  other
+}
+
+enum transaction_status {
+  paid
+  pending
+}
+
+enum recurrence_frequency {
+  weekly
+  monthly
+  yearly
+}
+
+enum import_format {
+  nubank_account_csv
+  nubank_card_csv
+  ofx
+  generic_csv
+  /// Sincronização via Open Finance (Pluggy).
+  pluggy
+}
+
+enum import_status {
+  completed
+  undone
+}
+
+enum goal_kind {
+  emergency
+  purchase
+  debt
+  other
+}
+
+model Profile {
+  id           String   @id @db.Uuid
+  user         User     @relation(fields: [id], references: [id], onDelete: Cascade)
+  display_name String?  @db.VarChar(80)
+  timezone     String   @default("America/Sao_Paulo")
+  currency     String   @default("BRL") @db.Char(3)
+  created_at   DateTime @default(now()) @db.Timestamptz(3)
+  updated_at   DateTime @updatedAt @db.Timestamptz(3)
+
+  @@map("profiles")
+}
+
+model BankAccount {
+  id                    String       @id @default(uuid()) @db.Uuid
+  user_id               String       @db.Uuid
+  user                  User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  name                  String       @db.VarChar(80)
+  type                  account_type
+  institution           String?      @db.VarChar(80)
+  currency              String       @default("BRL") @db.Char(3)
+  initial_balance_cents BigInt       @default(0)
+  color                 String?      @db.Char(7)
+  archived_at           DateTime?    @db.Timestamptz(3)
+  created_at            DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at            DateTime     @updatedAt @db.Timestamptz(3)
+
+  credit_cards         CreditCard[]
+  recurring            RecurringTransaction[]
+  import_batches       ImportBatch[]
+  transactions         Transaction[]          @relation("TransactionAccount")
+  incoming_transfers   Transaction[]          @relation("TransactionDestination")
+
+  @@unique([user_id, id])
+  @@index([user_id])
+  @@map("accounts")
+}
+
+model Category {
+  id          String        @id @default(uuid()) @db.Uuid
+  user_id     String        @db.Uuid
+  user        User          @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  name        String        @db.VarChar(60)
+  kind        category_kind
+  icon        String        @default("circle") @db.VarChar(40)
+  color       String        @default("#64748b") @db.Char(7)
+  archived_at DateTime?     @db.Timestamptz(3)
+  created_at  DateTime      @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime      @updatedAt @db.Timestamptz(3)
+
+  recurring    RecurringTransaction[]
+  transactions Transaction[]
+  budgets      Budget[]
+
+  @@unique([user_id, id])
+  @@unique([user_id, kind, name])
+  @@map("categories")
+}
+
+model CreditCard {
+  id                 String       @id @default(uuid()) @db.Uuid
+  user_id            String       @db.Uuid
+  user               User         @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  name               String       @db.VarChar(80)
+  brand              String?      @db.VarChar(40)
+  limit_cents        BigInt
+  closing_day        Int          @db.SmallInt
+  due_day            Int          @db.SmallInt
+  payment_account_id String?      @db.Uuid
+  payment_account    BankAccount? @relation(fields: [user_id, payment_account_id], references: [user_id, id], onDelete: NoAction)
+  /// Limite disponível e usado informados pelo banco (Open Finance), mais confiáveis que o cálculo local.
+  bank_available_cents BigInt?
+  bank_used_cents      BigInt?
+  bank_synced_at       DateTime? @db.Timestamptz(3)
+  color              String?      @db.Char(7)
+  archived_at        DateTime?    @db.Timestamptz(3)
+  created_at         DateTime     @default(now()) @db.Timestamptz(3)
+  updated_at         DateTime     @updatedAt @db.Timestamptz(3)
+
+  invoices       CreditCardInvoice[]
+  import_batches ImportBatch[]
+  transactions   Transaction[]
+
+  @@unique([user_id, id])
+  @@index([user_id])
+  @@map("credit_cards")
+}
+
+model CreditCardInvoice {
+  id              String     @id @default(uuid()) @db.Uuid
+  user_id         String     @db.Uuid
+  user            User       @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  credit_card_id  String     @db.Uuid
+  credit_card     CreditCard @relation(fields: [user_id, credit_card_id], references: [user_id, id], onDelete: Cascade)
+  /// Primeiro dia do mês em que a fatura fecha.
+  reference_month DateTime   @db.Date
+  closing_date    DateTime   @db.Date
+  due_date        DateTime   @db.Date
+  /// Valor da fatura informado por você (app do banco); a diferença vira um ajuste automático.
+  bank_amount_cents BigInt?
+  created_at      DateTime   @default(now()) @db.Timestamptz(3)
+  updated_at      DateTime   @updatedAt @db.Timestamptz(3)
+
+  import_batches ImportBatch[]
+  transactions   Transaction[]
+
+  @@unique([user_id, id])
+  @@unique([credit_card_id, reference_month])
+  @@index([user_id, due_date])
+  @@map("credit_card_invoices")
+}
+
+model RecurringTransaction {
+  id                 String               @id @default(uuid()) @db.Uuid
+  user_id            String               @db.Uuid
+  user               User                 @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  kind               transaction_kind
+  description        String               @db.VarChar(200)
+  amount_cents       BigInt
+  category_id        String?              @db.Uuid
+  category           Category?            @relation(fields: [user_id, category_id], references: [user_id, id], onDelete: NoAction)
+  account_id         String               @db.Uuid
+  account            BankAccount          @relation(fields: [user_id, account_id], references: [user_id, id], onDelete: Cascade)
+  payment_method     payment_method?
+  frequency          recurrence_frequency @default(monthly)
+  start_on           DateTime             @db.Date
+  end_on             DateTime?            @db.Date
+  /// Próxima ocorrência ainda não materializada como transação.
+  next_occurrence_on DateTime             @db.Date
+  active             Boolean              @default(true)
+  created_at         DateTime             @default(now()) @db.Timestamptz(3)
+  updated_at         DateTime             @updatedAt @db.Timestamptz(3)
+
+  transactions Transaction[]
+
+  @@unique([user_id, id])
+  @@index([user_id, next_occurrence_on])
+  @@map("recurring_transactions")
+}
+
+model ImportBatch {
+  id              String             @id @default(uuid()) @db.Uuid
+  user_id         String             @db.Uuid
+  user            User               @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  format          import_format
+  file_name       String             @db.VarChar(255)
+  file_sha256     String             @db.Char(64)
+  account_id      String?            @db.Uuid
+  account         BankAccount?       @relation(fields: [user_id, account_id], references: [user_id, id], onDelete: Cascade)
+  credit_card_id  String?            @db.Uuid
+  credit_card     CreditCard?        @relation(fields: [user_id, credit_card_id], references: [user_id, id], onDelete: Cascade)
+  invoice_id      String?            @db.Uuid
+  invoice         CreditCardInvoice? @relation(fields: [user_id, invoice_id], references: [user_id, id], onDelete: NoAction)
+  total_rows      Int                @default(0)
+  imported_count  Int                @default(0)
+  duplicate_count Int                @default(0)
+  skipped_count   Int                @default(0)
+  error_count     Int                @default(0)
+  /// Só metadados de erro (linha, motivo). Nunca o conteúdo do arquivo.
+  errors          Json               @default("[]")
+  status          import_status      @default(completed)
+  undone_at       DateTime?          @db.Timestamptz(3)
+  created_at      DateTime           @default(now()) @db.Timestamptz(3)
+
+  transactions Transaction[]
+
+  @@unique([user_id, id])
+  @@index([user_id, created_at(sort: Desc)])
+  @@index([user_id, file_sha256])
+  @@map("import_batches")
+}
+
+model Transaction {
+  id                       String                @id @default(uuid()) @db.Uuid
+  user_id                  String                @db.Uuid
+  user                     User                  @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  kind                     transaction_kind
+  status                   transaction_status    @default(paid)
+  payment_method           payment_method?
+  amount_cents             BigInt
+  /// Data do fato (ou do vencimento, se pendente). created_at é a do cadastro.
+  occurred_on              DateTime              @db.Date
+  description              String                @db.VarChar(200)
+  notes                    String?               @db.VarChar(2000)
+  category_id              String?               @db.Uuid
+  category                 Category?             @relation(fields: [user_id, category_id], references: [user_id, id], onDelete: NoAction)
+  account_id               String?               @db.Uuid
+  account                  BankAccount?          @relation("TransactionAccount", fields: [user_id, account_id], references: [user_id, id], onDelete: Restrict)
+  destination_account_id   String?               @db.Uuid
+  destination_account      BankAccount?          @relation("TransactionDestination", fields: [user_id, destination_account_id], references: [user_id, id], onDelete: Restrict)
+  credit_card_id           String?               @db.Uuid
+  credit_card              CreditCard?           @relation(fields: [user_id, credit_card_id], references: [user_id, id], onDelete: Restrict)
+  invoice_id               String?               @db.Uuid
+  invoice                  CreditCardInvoice?    @relation(fields: [user_id, invoice_id], references: [user_id, id], onDelete: Restrict)
+  installment_group_id     String?               @db.Uuid
+  installment_number       Int?                  @db.SmallInt
+  installment_total        Int?                  @db.SmallInt
+  recurring_transaction_id String?               @db.Uuid
+  recurring                RecurringTransaction? @relation(fields: [user_id, recurring_transaction_id], references: [user_id, id], onDelete: NoAction)
+  import_batch_id          String?               @db.Uuid
+  import_batch             ImportBatch?          @relation(fields: [user_id, import_batch_id], references: [user_id, id], onDelete: Restrict)
+  /// FITID do OFX ou "Identificador" do CSV do Nubank.
+  external_id              String?               @db.VarChar(255)
+  /// Chave de deduplicação da importação, calculada no servidor.
+  dedupe_key               String?               @db.VarChar(512)
+  created_at               DateTime              @default(now()) @db.Timestamptz(3)
+  updated_at               DateTime              @updatedAt @db.Timestamptz(3)
+
+  // NULLs são distintos: lançamentos manuais (sem chave) nunca colidem.
+  @@unique([user_id, dedupe_key])
+  @@unique([recurring_transaction_id, occurred_on])
+  @@index([user_id, occurred_on(sort: Desc)])
+  @@index([account_id])
+  @@index([destination_account_id])
+  @@index([credit_card_id])
+  @@index([invoice_id])
+  @@index([category_id])
+  @@index([import_batch_id])
+  @@index([installment_group_id])
+  @@map("transactions")
+}
+
+model Budget {
+  id          String   @id @default(uuid()) @db.Uuid
+  user_id     String   @db.Uuid
+  user        User     @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  category_id String   @db.Uuid
+  category    Category @relation(fields: [user_id, category_id], references: [user_id, id], onDelete: Cascade)
+  month       DateTime @db.Date
+  limit_cents BigInt
+  created_at  DateTime @default(now()) @db.Timestamptz(3)
+  updated_at  DateTime @updatedAt @db.Timestamptz(3)
+
+  @@unique([user_id, category_id, month])
+  @@map("budgets")
+}
+
+model FinancialGoal {
+  id           String    @id @default(uuid()) @db.Uuid
+  user_id      String    @db.Uuid
+  user         User      @relation(fields: [user_id], references: [id], onDelete: Cascade)
+  name         String    @db.VarChar(80)
+  kind         goal_kind @default(other)
+  target_cents BigInt
+  saved_cents  BigInt    @default(0)
+  target_date  DateTime? @db.Date
+  color        String?   @db.Char(7)
+  archived_at  DateTime? @db.Timestamptz(3)
+  created_at   DateTime  @default(now()) @db.Timestamptz(3)
+  updated_at   DateTime  @updatedAt @db.Timestamptz(3)
+
+  @@index([user_id])
+  @@map("financial_goals")
+}

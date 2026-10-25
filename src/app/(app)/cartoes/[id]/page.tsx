@@ -4,6 +4,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { z } from "zod";
 
+import { BankAmountForm } from "@/components/cards/bank-amount-form";
 import { CardActions } from "@/components/cards/card-actions";
 import { PayInvoiceDialog } from "@/components/cards/pay-invoice-dialog";
 import { ColorDot, EmptyState, Money, PageHeader } from "@/components/shared";
@@ -90,7 +91,7 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Card>
           <CardContent>
-            <p className="text-sm text-muted-foreground">Limite disponível</p>
+            <p className="text-sm text-muted-foreground">Limite disponível{card.bank_synced_at ? " · pelo banco" : ""}</p>
             <Money cents={card.available_cents} tone={card.available_cents < 0 ? "negative" : "neutral"} className="mt-1 block text-2xl font-semibold" />
             <p className="mt-1 text-xs text-muted-foreground">de {formatMoney(card.limit_cents)}</p>
           </CardContent>
@@ -99,7 +100,9 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
           <CardContent>
             <p className="text-sm text-muted-foreground">Comprometido no cartão</p>
             <Money cents={Math.max(0, card.used_cents)} className="mt-1 block text-2xl font-semibold" />
-            <p className="mt-1 text-xs text-muted-foreground">faturas em aberto e parcelas futuras</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {card.bank_synced_at ? "informado pelo banco: faturas, parcelas futuras e rotativo" : "faturas em aberto e parcelas futuras"}
+            </p>
           </CardContent>
         </Card>
         <Card>
@@ -145,6 +148,11 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
               <Figure label="Pago" cents={invoice.paidCents} />
               <Figure label="Em aberto" cents={Math.max(0, invoice.remainingCents)} strong />
             </dl>
+            {invoice.id && invoice.status !== "paid" && month <= currentMonth && (
+              <div className="px-2">
+                <BankAmountForm invoiceId={invoice.id} bankAmountCents={invoice.bank_amount_cents} />
+              </div>
+            )}
             {invoice.id && invoice.remainingCents > 0 && month <= currentMonth && (
               <div className="px-2">
                 <PayInvoiceDialog

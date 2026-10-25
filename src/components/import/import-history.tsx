@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { formatDateTime } from "@/domain/dates";
 import { IMPORT_FORMAT_LABEL } from "@/domain/labels";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { undoImport } from "@/server/actions/imports";
 
 export function ImportHistory({

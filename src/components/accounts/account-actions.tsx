@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { deleteAccount, setAccountArchived } from "@/server/actions/accounts";
 import { useServerAction } from "@/hooks/use-server-action";
 

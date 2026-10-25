@@ -1,4 +1,4 @@
-import type { Enums } from "@/lib/supabase/database.types";
+import type { Enums } from "@/lib/db/types";
 
 export const ACCOUNT_TYPE_LABEL: Record<Enums<"account_type">, string> = {
   checking: "Conta corrente",
@@ -23,6 +23,19 @@ export const TRANSACTION_KIND_LABEL: Record<Enums<"transaction_kind">, string> =
   invoice_payment: "Pagamento de fatura",
 };
 
+export const PAYMENT_METHOD_LABEL: Record<Enums<"payment_method">, string> = {
+  pix: "Pix",
+  debit_card: "Cartão de débito",
+  credit_card: "Cartão de crédito",
+  boleto: "Boleto",
+  cash: "Dinheiro",
+  transfer: "Transferência / TED",
+  other: "Outro",
+};
+
+/** Ordem de exibição nos formulários. */
+export const PAYMENT_METHODS = ["pix", "debit_card", "credit_card", "boleto", "cash", "transfer", "other"] as const;
+
 export const TRANSACTION_STATUS_LABEL: Record<Enums<"transaction_status">, string> = {
   paid: "Efetivada",
   pending: "Pendente",
@@ -46,6 +59,7 @@ export const IMPORT_FORMAT_LABEL: Record<Enums<"import_format">, string> = {
   nubank_card_csv: "Nubank · fatura (CSV)",
   ofx: "OFX",
   generic_csv: "CSV (mapeado)",
+  pluggy: "Open Finance (Pluggy)",
 };
 
 export const PALETTE = [

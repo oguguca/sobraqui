@@ -2,7 +2,6 @@ import "server-only";
 
 import { z } from "zod";
 
-import { invoiceAmount, invoiceStatus } from "@/domain/credit-card";
 import {
   addDays,
   addMonthsToMonth,
@@ -24,9 +23,10 @@ import {
   summarize,
 } from "@/domain/ledger";
 import type { AuthContext } from "@/server/auth";
+import { dbDate } from "@/server/db";
 
+import { currentInvoiceMonth, invoiceTotals, listInvoices, summarizeInvoice } from "./cards";
 import type { LedgerContext } from "./context";
-import { fetchAll } from "./core";
 import { transactionsBetween } from "./transactions";
 
 export const periodSchema = z.object({
@@ -72,6 +72,19 @@ export async function loadDashboard(ctx: AuthContext, ledger: LedgerContext, per
   const previous = filterByRange(all, prev);
   const summary = summarize(current);
   const previousSummary = summarize(previous);
+  // Gastos à vista (saíram da conta): débito, Pix, boleto, dinheiro. O cartão fica na fatura.
+  const fromAccount = (list: typeof current) => list.filter((t) => !t.credit_card_id);
+  const accountSpend = summarize(fromAccount(current)).netExpenseCents;
+  const previousAccountSpend = summarize(fromAccount(previous)).netExpenseCents;
+  const methodTotals = new Map<string, number>();
+  for (const t of fromAccount(current)) {
+    if (t.kind !== "expense" || t.status !== "paid") continue;
+    const key = t.payment_method ?? "other";
+    methodTotals.set(key, (methodTotals.get(key) ?? 0) + t.amount_cents);
+  }
+  const accountSpendByMethod = [...methodTotals]
+    .map(([method, cents]) => ({ method, cents }))
+    .sort((a, b) => b.cents - a.cents);
 
   const months = monthsBetween(trendStart, monthOf(range.to));
   const trend = monthlyTotals(
@@ -93,12 +106,13 @@ export async function loadDashboard(ctx: AuthContext, ledger: LedgerContext, per
   const recent = [...all]
     .filter((t) => t.occurred_on <= today)
     .sort((a, b) => (a.occurred_on === b.occurred_on ? b.created_at.localeCompare(a.created_at) : b.occurred_on.localeCompare(a.occurred_on)))
-    .slice(0, 6);
+    .slice(0, 9);
 
-  const [upcoming, invoices, goals] = await Promise.all([
+  const [upcoming, invoices, goals, billsToPay] = await Promise.all([
     loadUpcoming(ctx, today, accountId),
     accountId ? Promise.resolve([]) : loadOpenInvoices(ctx, ledger, today),
     loadGoals(ctx),
+    accountId ? Promise.resolve([]) : loadBillsToPay(ctx, ledger, today),
   ]);
 
   // Média diária sobre os dias já decorridos do período (período futuro: o período inteiro).
@@ -119,7 +133,12 @@ export async function loadDashboard(ctx: AuthContext, ledger: LedgerContext, per
     cards: accountId ? [] : ledger.activeCards,
     summary,
     previousSummary,
+    accountSpend,
+    accountSpendByMethod,
+    billsToPay,
+    billsToPayCents: billsToPay.reduce((s, b) => s + b.remainingCents, 0),
     changes: {
+      accountSpend: relativeChange(accountSpend, previousAccountSpend),
       income: relativeChange(summary.incomeCents, previousSummary.incomeCents),
       expense: relativeChange(summary.netExpenseCents, previousSummary.netExpenseCents),
       result: relativeChange(summary.resultCents, previousSummary.resultCents),
@@ -148,60 +167,70 @@ export async function loadDashboard(ctx: AuthContext, ledger: LedgerContext, per
 
 /** Contas a pagar/receber: pendentes vencidas e dos próximos 15 dias. */
 async function loadUpcoming(ctx: AuthContext, today: string, accountId: string | null) {
-  let q = ctx.supabase
-    .from("transactions")
-    .select("*")
-    .eq("status", "pending")
-    .lte("occurred_on", addDays(today, 15))
-    .order("occurred_on")
-    .limit(8);
-  if (accountId) q = q.eq("account_id", accountId);
-  const { data } = await q;
-  return (data ?? []).map((t) => ({ ...t, overdue: t.occurred_on < today }));
+  const rows = await ctx.db((tx) =>
+    tx.transaction.findMany({
+      where: {
+        user_id: ctx.user.id,
+        status: "pending",
+        occurred_on: { lte: dbDate(addDays(today, 15)) },
+        ...(accountId ? { account_id: accountId } : {}),
+      },
+      orderBy: { occurred_on: "asc" },
+      take: 8,
+    }),
+  );
+  return rows.map((t) => ({ ...t, overdue: t.occurred_on < today }));
 }
 
-/** Faturas com saldo em aberto que vencem até 40 dias (ou já venceram). */
+/** Faturas com saldo em aberto que vencem até 40 dias (ou venceram nos últimos 90). */
 async function loadOpenInvoices(ctx: AuthContext, ledger: LedgerContext, today: string) {
-  const { data: invoices } = await ctx.supabase
-    .from("credit_card_invoices")
-    .select("*")
-    .lte("due_date", addDays(today, 40))
-    .gte("due_date", addDays(today, -90))
-    .order("due_date");
-  if (!invoices?.length) return [];
-  const totals = await fetchAll((from, to) =>
-    ctx.supabase
-      .from("invoice_totals")
-      .select("*")
-      .in(
-        "invoice_id",
-        invoices.map((i) => i.id),
-      )
-      .range(from, to),
-  );
-  const byId = new Map(totals.map((t) => [t.invoice_id, t]));
-  return invoices
-    .map((inv) => {
-      const t = byId.get(inv.id) ?? { charges_cents: 0, refunds_cents: 0, paid_cents: 0 };
-      return {
-        ...inv,
-        cardName: ledger.lookups.cards[inv.credit_card_id] ?? "Cartão",
-        amountCents: invoiceAmount(t),
-        remainingCents: invoiceAmount(t) - t.paid_cents,
-        status: invoiceStatus(inv, t, today),
-      };
-    })
+  const userId = ctx.user.id;
+  const summaries = await ctx.db(async (tx) => {
+    const invoices = await tx.creditCardInvoice.findMany({
+      where: { user_id: userId, due_date: { lte: dbDate(addDays(today, 40)), gte: dbDate(addDays(today, -90)) } },
+      orderBy: { due_date: "asc" },
+    });
+    const totals = await invoiceTotals(tx, userId, invoices.map((i) => i.id));
+    return invoices.map((inv) => summarizeInvoice(inv, totals.get(inv.id), today));
+  });
+  return summaries
+    .map((inv) => ({ ...inv, cardName: ledger.lookups.cards[inv.credit_card_id] ?? "Cartão" }))
     .filter((i) => i.remainingCents > 0);
 }
 
+/**
+ * O que falta pagar dos cartões: fatura aberta de cada cartão e faturas
+ * fechadas ainda não quitadas (inclui vencidas).
+ */
+async function loadBillsToPay(ctx: AuthContext, ledger: LedgerContext, today: string) {
+  const bills = await Promise.all(
+    ledger.activeCards.map(async (card) => {
+      const invoices = await listInvoices(ctx, card.id, today);
+      const openMonth = currentInvoiceMonth(card, today);
+      return invoices
+        .filter((i) => i.remainingCents > 0 && monthOf(i.reference_month) <= openMonth)
+        .map((i) => ({
+          cardId: card.id,
+          cardName: card.name,
+          remainingCents: i.remainingCents,
+          dueDate: i.due_date,
+          closingDate: i.closing_date,
+          status: i.status,
+          month: monthOf(i.reference_month),
+        }));
+    }),
+  );
+  return bills.flat().sort((a, b) => a.dueDate.localeCompare(b.dueDate));
+}
+
 async function loadGoals(ctx: AuthContext) {
-  const { data } = await ctx.supabase
-    .from("financial_goals")
-    .select("*")
-    .is("archived_at", null)
-    .order("target_date", { ascending: true, nullsFirst: false })
-    .limit(4);
-  return data ?? [];
+  return ctx.db((tx) =>
+    tx.financialGoal.findMany({
+      where: { user_id: ctx.user.id, archived_at: null },
+      orderBy: [{ target_date: { sort: "asc", nulls: "last" } }, { created_at: "asc" }],
+      take: 4,
+    }),
+  );
 }
 
 export type DashboardData = Awaited<ReturnType<typeof loadDashboard>>;

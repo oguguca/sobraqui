@@ -21,7 +21,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { centsToInput } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
 import { cardSchema, type CardInput, type CardValues } from "@/lib/schemas";
-import type { Tables } from "@/lib/supabase/database.types";
+import type { Tables } from "@/lib/db/types";
 import { createCard, updateCard } from "@/server/actions/cards";
 
 const NONE = "__none__";
@@ -74,7 +74,7 @@ export function CardFormDialog({
           <DialogTitle>{card ? "Editar cartão" : "Novo cartão"}</DialogTitle>
           <DialogDescription>
             Compras no dia do fechamento ou depois entram na fatura seguinte.
-            {card && " Mudanças de dia valem para faturas ainda não criadas."}
+            {card && " Mudanças de dia valem para a fatura aberta e as próximas; as já fechadas não mudam."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="grid gap-4" noValidate>

@@ -13,6 +13,8 @@ export const transactionFormSchema = z
     notes: optionalText(2000),
     /** Origem do dinheiro em despesas e estornos. */
     source: z.enum(["account", "card"]).default("account"),
+    /** Forma de pagamento das saídas. Crédito vai para o cartão; as demais saem da conta. */
+    paymentMethod: z.enum(["pix", "debit_card", "credit_card", "boleto", "cash", "transfer", "other"]).default("pix"),
     accountId: optionalUuid,
     destinationAccountId: optionalUuid,
     cardId: optionalUuid,
@@ -21,7 +23,7 @@ export const transactionFormSchema = z
     repeat: z.enum(["none", "weekly", "monthly", "yearly"]).default("none"),
   })
   .superRefine((v, ctx) => {
-    const usesCard = (v.mode === "expense" || v.mode === "refund") && v.source === "card";
+    const usesCard = usesCreditCard(v);
     if (usesCard && !v.cardId) ctx.addIssue({ code: "custom", path: ["cardId"], message: "Escolha o cartão." });
     if (!usesCard && !v.accountId) {
       ctx.addIssue({ code: "custom", path: ["accountId"], message: "Escolha a conta." });
@@ -55,7 +57,16 @@ export const transactionUpdateSchema = z.object({
   categoryId: optionalUuid,
   notes: optionalText(2000),
   status: z.enum(["paid", "pending"]),
+  /** Só para saídas em conta (trocar para crédito exige relançar no cartão). */
+  paymentMethod: z.enum(["pix", "debit_card", "boleto", "cash", "transfer", "other"]).nullable().optional(),
 });
 
 export type TransactionUpdateInput = z.input<typeof transactionUpdateSchema>;
 export type TransactionUpdateValues = z.output<typeof transactionUpdateSchema>;
+
+/** Saída no crédito ou estorno no cartão: o lançamento vai para a fatura. */
+export function usesCreditCard(v: { mode: string; source?: string; paymentMethod?: string }): boolean {
+  if (v.mode === "expense") return v.paymentMethod === "credit_card";
+  if (v.mode === "refund") return v.source === "card";
+  return false;
+}

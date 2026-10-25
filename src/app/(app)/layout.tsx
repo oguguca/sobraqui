@@ -13,10 +13,10 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   return (
     <SidebarProvider defaultOpen={sidebarOpen}>
       <AppSidebar email={user.email} />
-      <SidebarInset>
+      <SidebarInset className="bg-background">
         <header
           data-print-hidden
-          className="sticky top-0 z-20 flex h-14 items-center gap-2 border-b bg-background/85 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/70"
+          className="sticky top-0 z-20 flex h-14 items-center gap-2 bg-background/80 px-4 backdrop-blur supports-[backdrop-filter]:bg-background/60 md:px-6"
         >
           <SidebarTrigger className="-ml-1" />
           <Separator orientation="vertical" className="mx-1 data-[orientation=vertical]:h-4" />

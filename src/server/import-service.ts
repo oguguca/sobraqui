@@ -4,21 +4,28 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { invoiceDatesFor, invoiceForPurchase } from "@/domain/credit-card";
-import { addMonthsToMonth, isISOMonth, monthOf } from "@/domain/dates";
+import { addMonthsToMonth, formatDate, isISOMonth, monthOf } from "@/domain/dates";
 import { buildPreview, parseStatementFile, type ManualCandidate } from "@/domain/import/pipeline";
+import { categoryFromDescription } from "@/domain/import/merchant-rules";
+import { mapPluggyTransaction, unpaidBillCarryOver } from "@/domain/import/pluggy";
 import { normalizeText } from "@/domain/import/text";
 import {
   MAX_IMPORT_BYTES,
   type GenericCsvMapping,
   type ImportAction,
   type ImportFormat,
+  type ImportTarget,
   type PreviewRow,
+  type RawRecord,
   type RowError,
 } from "@/domain/import/types";
-import type { TablesInsert } from "@/lib/supabase/database.types";
+import type { Prisma } from "@/generated/prisma/client";
 import { ActionError } from "@/server/action";
 import type { AuthContext } from "@/server/auth";
-import { fetchAll } from "@/server/queries/core";
+import { dbDate, type Tx } from "@/server/db";
+import { ensureInvoices } from "@/server/invoices";
+import { getPluggyAccount, listPluggyBills, listPluggyTransactions } from "@/server/pluggy";
+import { accountBalances, fetchAll } from "@/server/queries/core";
 
 const mappingSchema = z.object({
   dateColumn: z.number().int().min(0),
@@ -34,7 +41,10 @@ export const importOptionsSchema = z.object({
   target: z.enum(["account", "card"]),
   targetId: z.uuid("Escolha a conta ou o cartão de destino."),
   mapping: mappingSchema.nullable().default(null),
-  /** Fatura que recebe as compras de um arquivo de cartão (AAAA-MM). */
+  /**
+   * Fatura que recebe todas as compras de um arquivo de cartão (AAAA-MM).
+   * Na sincronização por Open Finance fica nulo: cada compra vai para a fatura da sua data.
+   */
   invoiceMonth: z.string().refine(isISOMonth).nullable().default(null),
   /** Cartão abatido pelas linhas "pagamento de fatura" de um extrato de conta. */
   paymentCardId: z.uuid().nullable().default(null),
@@ -68,7 +78,21 @@ export type PreviewResult =
     }
   | { kind: "mapping"; headers: string[]; sample: string[][] };
 
-export async function readUpload(file: unknown): Promise<{ bytes: Uint8Array; name: string }> {
+type Upload = { bytes: Uint8Array; name: string };
+
+/** Registros já lidos de uma fonte (arquivo ou Open Finance), prontos para a prévia. */
+export type ImportSource = {
+  format: ImportFormat;
+  fileName: string;
+  sha256: string;
+  records: RawRecord[];
+  errors: RowError[];
+  detectedTarget: ImportTarget | null;
+  /** Cartão: o banco já enviou o lançamento do rotativo (dispensa o nosso "saldo não pago"). */
+  bankCarriesOver?: boolean;
+};
+
+export async function readUpload(file: unknown): Promise<Upload> {
   if (!(file instanceof File)) throw new ActionError("Envie um arquivo.");
   if (file.size === 0) throw new ActionError("O arquivo está vazio.");
   if (file.size > MAX_IMPORT_BYTES) throw new ActionError("O arquivo passa do limite de 2 MB.");
@@ -76,72 +100,144 @@ export async function readUpload(file: unknown): Promise<{ bytes: Uint8Array; na
   return { bytes: new Uint8Array(await file.arrayBuffer()), name };
 }
 
-function scopeOf(options: ImportOptions) {
-  return `${options.target === "card" ? "card" : "acc"}:${options.targetId}`;
-}
+// ---------------------------------------------------------------------------
+// Fontes
+// ---------------------------------------------------------------------------
 
-async function assertTarget(ctx: AuthContext, options: ImportOptions) {
-  const table = options.target === "card" ? "credit_cards" : "accounts";
-  const { data } = await ctx.supabase.from(table).select("id, archived_at").eq("id", options.targetId).maybeSingle();
-  if (!data) throw new ActionError(options.target === "card" ? "Cartão não encontrado." : "Conta não encontrada.");
-  if (data.archived_at) throw new ActionError("O destino escolhido está arquivado.");
-}
-
-/** Lê, valida e classifica o arquivo sem gravar nada. */
-export async function buildImportPreview(
-  ctx: AuthContext,
-  upload: { bytes: Uint8Array; name: string },
+export function sourceFromUpload(
+  upload: Upload,
   options: ImportOptions,
-): Promise<PreviewResult> {
-  await assertTarget(ctx, options);
+): ImportSource | { kind: "mapping"; headers: string[]; sample: string[][] } {
   const parsed = parseStatementFile(upload.bytes, upload.name, options.mapping as GenericCsvMapping | null);
   if (!parsed.ok) {
     if (parsed.needsMapping) return { kind: "mapping", headers: parsed.headers, sample: parsed.sample };
     throw new ActionError(parsed.error);
   }
+  return {
+    format: parsed.format,
+    fileName: upload.name,
+    sha256: createHash("sha256").update(upload.bytes).digest("hex"),
+    records: parsed.records,
+    errors: parsed.errors,
+    detectedTarget: parsed.detectedTarget,
+  };
+}
 
+/** Busca na Pluggy as transações da conta/cartão do Open Finance no período. */
+export async function sourceFromPluggy(pluggyAccountId: string, from: string, to: string): Promise<ImportSource> {
+  const account = await getPluggyAccount(pluggyAccountId);
+  const transactions = await listPluggyTransactions(account.id, from, to);
+  const records: RawRecord[] = [];
+  const errors: RowError[] = [];
+  transactions.forEach((t, i) => {
+    const record = mapPluggyTransaction(t, account.type, i + 1);
+    if (record) records.push(record);
+    else errors.push({ line: i + 1, reason: "Transação sem data ou valor válido." });
+  });
+  // Cartão: saldo não pago de faturas fechadas no período vai para a fatura seguinte,
+  // a menos que o próprio banco já mande o lançamento do rotativo.
+  const bankCarriesOver = transactions.some((t) => t.amount > 0 && /rotativo|saldo (anterior|em atraso)/i.test(t.description));
+  if (account.type === "CREDIT" && !bankCarriesOver) {
+    for (const bill of await listPluggyBills(account.id)) {
+      const closing = bill.billClosingDate?.slice(0, 10);
+      if (!closing || closing < from || closing > to) continue;
+      const carry = unpaidBillCarryOver(bill, transactions.length + records.length + 1);
+      if (carry) records.push(carry);
+    }
+  }
+  if (records.length === 0) throw new ActionError("Nenhuma transação nesse período.");
+  const ids = transactions.map((t) => t.id).sort();
+  const label = account.type === "CREDIT" ? "cartão" : "conta";
+  return {
+    format: "pluggy",
+    fileName: `Open Finance · ${account.marketingName ?? account.name} (${label}) · ${formatDate(from)} a ${formatDate(to)}`.slice(0, 255),
+    sha256: createHash("sha256").update(ids.join(",")).digest("hex"),
+    records,
+    errors,
+    detectedTarget: account.type === "CREDIT" ? "card" : "account",
+    bankCarriesOver,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Prévia
+// ---------------------------------------------------------------------------
+
+function scopeOf(options: ImportOptions) {
+  return `${options.target === "card" ? "card" : "acc"}:${options.targetId}`;
+}
+
+async function assertTarget(tx: Tx, userId: string, options: ImportOptions) {
+  const where = { id: options.targetId, user_id: userId };
+  const select = { archived_at: true } as const;
+  const target =
+    options.target === "card"
+      ? await tx.creditCard.findFirst({ where, select })
+      : await tx.bankAccount.findFirst({ where, select });
+  if (!target) throw new ActionError(options.target === "card" ? "Cartão não encontrado." : "Conta não encontrada.");
+  if (target.archived_at) throw new ActionError("O destino escolhido está arquivado.");
+}
+
+/** Lê, valida e classifica sem gravar nada. */
+export async function buildImportPreview(
+  ctx: AuthContext,
+  source: ImportSource,
+  options: ImportOptions,
+): Promise<PreviewResult> {
+  return ctx.db((tx) => previewInTx(tx, ctx.user.id, source, options), { timeoutMs: 30_000 });
+}
+
+async function previewInTx(
+  tx: Tx,
+  userId: string,
+  source: ImportSource,
+  options: ImportOptions,
+): Promise<Extract<PreviewResult, { kind: "preview" }>> {
+  await assertTarget(tx, userId, options);
   const scope = scopeOf(options);
-  const fileSha256 = createHash("sha256").update(upload.bytes).digest("hex");
-  const dates = parsed.records.map((r) => r.occurredOn).sort();
-  const [existingKeys, manual, history, previous] = await Promise.all([
-    loadExistingKeys(ctx, scope),
-    loadManualCandidates(ctx, options, dates[0], dates[dates.length - 1]),
-    loadCategoryHistory(ctx),
-    ctx.supabase
-      .from("import_batches")
-      .select("created_at")
-      .eq("file_sha256", fileSha256)
-      .eq("status", "completed")
-      .order("created_at", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-  ]);
+  const dates = source.records.map((r) => r.occurredOn).sort();
+  const existingKeys = await loadExistingKeys(tx, userId, scope);
+  const manual = await loadManualCandidates(tx, userId, options, dates[0], dates[dates.length - 1]);
+  const history = await loadCategoryHistory(tx, userId);
+  const previous = await tx.importBatch.findFirst({
+    where: { user_id: userId, file_sha256: source.sha256, status: "completed" },
+    orderBy: { created_at: "desc" },
+    select: { created_at: true },
+  });
 
-  const rows = buildPreview(parsed.records, options.target, scope, existingKeys, manual).map((row) => ({
-    ...row,
-    suggestedCategoryId: history.get(normalizeText(row.description)) ?? null,
-  }));
+  // Categoria sugerida, nesta ordem: o que você já usou para a mesma descrição;
+  // regra por estabelecimento (Uber, iFood, Shopee...); categoria informada pela fonte.
+  const byName = await loadCategoriesByName(tx, userId);
+  const categoryId = (kind: "income" | "expense", name: string | null | undefined) =>
+    name ? (byName.get(`${kind}:${normalizeText(name)}`) ?? null) : null;
+  const rows = buildPreview(source.records, options.target, scope, existingKeys, manual).map((row) => {
+    const kind = row.suggestedAction === "income" ? "income" : "expense";
+    const fromRule = kind === "expense" ? categoryId(kind, categoryFromDescription(row.description)) : null;
+    return {
+      ...row,
+      suggestedCategoryId: history.get(normalizeText(row.description)) ?? fromRule ?? categoryId(kind, row.hints?.categoryName),
+    };
+  });
 
   let suggestedInvoiceMonth: string | null = null;
-  if (options.target === "card") {
-    const { data: card } = await ctx.supabase
-      .from("credit_cards")
-      .select("closing_day, due_day")
-      .eq("id", options.targetId)
-      .maybeSingle();
+  if (options.target === "card" && source.format !== "pluggy") {
+    const card = await tx.creditCard.findFirst({
+      where: { id: options.targetId, user_id: userId },
+      select: { closing_day: true, due_day: true },
+    });
     if (card) suggestedInvoiceMonth = mostCommonInvoiceMonth(rows, card);
   }
 
   return {
     kind: "preview",
-    format: parsed.format,
-    fileName: upload.name,
-    fileSha256,
+    format: source.format,
+    fileName: source.fileName,
+    fileSha256: source.sha256,
     rows,
-    errors: parsed.errors,
-    targetMismatch: parsed.detectedTarget !== null && parsed.detectedTarget !== options.target,
+    errors: source.errors,
+    targetMismatch: source.detectedTarget !== null && source.detectedTarget !== options.target,
     suggestedInvoiceMonth,
-    previousImportAt: previous.data?.created_at ?? null,
+    previousImportAt: previous?.created_at ?? null,
   };
 }
 
@@ -156,53 +252,74 @@ function mostCommonInvoiceMonth(rows: PreviewRow[], card: { closing_day: number;
   return [...counts].sort((a, b) => b[1] - a[1])[0]?.[0] ?? null;
 }
 
-async function loadExistingKeys(ctx: AuthContext, scope: string): Promise<Set<string>> {
-  const prefixes = [`ext:${scope}:`, `h:${scope}:`];
-  const keys = new Set<string>();
-  for (const prefix of prefixes) {
-    const rows = await fetchAll((from, to) =>
-      ctx.supabase.from("transactions").select("dedupe_key").like("dedupe_key", `${prefix}%`).range(from, to),
-    );
-    for (const r of rows) if (r.dedupe_key) keys.add(r.dedupe_key);
-  }
-  return keys;
+async function loadExistingKeys(tx: Tx, userId: string, scope: string): Promise<Set<string>> {
+  const rows = await fetchAll((skip, take) =>
+    tx.transaction.findMany({
+      where: {
+        user_id: userId,
+        OR: [{ dedupe_key: { startsWith: `ext:${scope}:` } }, { dedupe_key: { startsWith: `h:${scope}:` } }],
+      },
+      select: { dedupe_key: true },
+      orderBy: { id: "asc" },
+      skip,
+      take,
+    }),
+  );
+  return new Set(rows.map((r) => r.dedupe_key).filter((k): k is string => Boolean(k)));
 }
 
 /** Lançamentos manuais no mesmo destino e período, para avisar de possíveis duplicatas. */
 async function loadManualCandidates(
-  ctx: AuthContext,
+  tx: Tx,
+  userId: string,
   options: ImportOptions,
   from: string,
   to: string,
 ): Promise<ManualCandidate[]> {
-  const column = options.target === "card" ? "credit_card_id" : "account_id";
-  return fetchAll((start, end) =>
-    ctx.supabase
-      .from("transactions")
-      .select("occurred_on, amount_cents, kind")
-      .eq(column, options.targetId)
-      .is("import_batch_id", null)
-      .gte("occurred_on", from)
-      .lte("occurred_on", to)
-      .range(start, end),
-  );
+  return tx.transaction.findMany({
+    where: {
+      user_id: userId,
+      import_batch_id: null,
+      ...(options.target === "card" ? { credit_card_id: options.targetId } : { account_id: options.targetId }),
+      occurred_on: { gte: dbDate(from), lte: dbDate(to) },
+    },
+    select: { occurred_on: true, amount_cents: true, kind: true },
+  });
+}
+
+/** Categorias ativas do usuário por "tipo:nome normalizado". */
+async function loadCategoriesByName(tx: Tx, userId: string): Promise<Map<string, string>> {
+  const rows = await tx.category.findMany({
+    where: { user_id: userId, archived_at: null },
+    select: { id: true, name: true, kind: true },
+  });
+  return new Map(rows.map((c) => [`${c.kind}:${normalizeText(c.name)}`, c.id]));
 }
 
 /** Categoria usada mais recentemente para cada descrição: sugestão que aprende com o uso. */
-async function loadCategoryHistory(ctx: AuthContext): Promise<Map<string, string>> {
-  const { data } = await ctx.supabase
-    .from("transactions")
-    .select("description, category_id")
-    .not("category_id", "is", null)
-    .order("occurred_on", { ascending: false })
-    .limit(3000);
+async function loadCategoryHistory(tx: Tx, userId: string): Promise<Map<string, string>> {
+  // A categoria genérica não ensina nada: deixa as regras e a fonte decidirem.
+  const generic = await tx.category.findFirst({
+    where: { user_id: userId, kind: "expense", name: "Outros gastos" },
+    select: { id: true },
+  });
+  const rows = await tx.transaction.findMany({
+    where: { user_id: userId, category_id: generic ? { not: null, notIn: [generic.id] } : { not: null } },
+    select: { description: true, category_id: true },
+    orderBy: { occurred_on: "desc" },
+    take: 3000,
+  });
   const map = new Map<string, string>();
-  for (const row of data ?? []) {
+  for (const row of rows) {
     const key = normalizeText(row.description);
     if (row.category_id && !map.has(key)) map.set(key, row.category_id);
   }
   return map;
 }
+
+// ---------------------------------------------------------------------------
+// Gravação
+// ---------------------------------------------------------------------------
 
 export type ImportReport = {
   batchId: string;
@@ -213,29 +330,71 @@ export type ImportReport = {
 };
 
 /**
- * Grava a importação. Reprocessa o arquivo no servidor (não confia em linhas
- * vindas do navegador) e aplica só as decisões do usuário: ação e categoria.
+ * Grava a importação numa única transação (tudo ou nada). Refaz a prévia no
+ * servidor (não confia em linhas vindas do navegador) e aplica só as decisões
+ * do usuário: ação e categoria.
  */
 export async function commitImport(
   ctx: AuthContext,
-  upload: { bytes: Uint8Array; name: string },
+  source: ImportSource,
   options: ImportOptions,
   decisions: ImportDecision[],
 ): Promise<ImportReport> {
-  const preview = await buildImportPreview(ctx, upload, options);
-  if (preview.kind !== "preview") throw new ActionError("Configure o mapeamento de colunas antes de importar.");
+  // Funções da Vercel têm duração limitada; a entrada é limitada a 5.000 linhas.
+  return ctx.db((tx) => commitInTx(tx, ctx.user.id, source, options, decisions), { timeoutMs: 45_000 });
+}
+
+/** UUID determinístico: as parcelas de uma compra caem sempre no mesmo grupo, mesmo em sincronizações diferentes. */
+function groupUuid(userId: string, scope: string, key: string): string {
+  const h = createHash("sha256").update(`${userId}|${scope}|${key}`).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${((parseInt(h[16], 16) & 3) | 8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
+async function commitInTx(
+  tx: Tx,
+  userId: string,
+  source: ImportSource,
+  options: ImportOptions,
+  decisions: ImportDecision[],
+): Promise<ImportReport> {
+  const preview = await previewInTx(tx, userId, source, options);
+  const scope = scopeOf(options);
 
   const byIndex = new Map(decisions.map((d) => [d.index, d]));
-  const allowed = options.target === "card" ? ["expense", "refund", "skip"] : ["income", "expense", "refund", "invoice_payment", "skip"];
-  const categories = await loadCategoryKinds(ctx);
+  const allowed: ImportAction[] =
+    options.target === "card" ? ["expense", "refund", "skip"] : ["income", "expense", "refund", "invoice_payment", "skip"];
+  const categories = new Map(
+    (await tx.category.findMany({ where: { user_id: userId }, select: { id: true, kind: true } })).map((c) => [c.id, c.kind]),
+  );
 
+  // Cartão: fatura única (arquivo de uma fatura) ou por data de cada compra (Open Finance).
   let cardInvoiceId: string | null = null;
+  let card: { closing_day: number; due_day: number } | null = null;
   if (options.target === "card") {
-    if (!options.invoiceMonth) throw new ActionError("Escolha a fatura que recebe estas compras.");
-    cardInvoiceId = await ensureInvoiceForMonth(ctx, options.targetId, options.invoiceMonth);
+    card = await tx.creditCard.findFirst({
+      where: { id: options.targetId, user_id: userId },
+      select: { closing_day: true, due_day: true },
+    });
+    if (!card) throw new ActionError("Cartão não encontrado.");
+    if (options.invoiceMonth) {
+      cardInvoiceId = await ensureInvoiceForMonth(tx, userId, options.targetId, options.invoiceMonth);
+    } else if (source.format !== "pluggy") {
+      throw new ActionError("Escolha a fatura que recebe estas compras.");
+    }
+  }
+  const invoiceByMonth = new Map<string, string>();
+  async function cardInvoiceFor(date: string): Promise<string> {
+    if (cardInvoiceId) return cardInvoiceId;
+    const month = monthOf(invoiceForPurchase(date, card!.closing_day, card!.due_day).referenceMonth);
+    let id = invoiceByMonth.get(month);
+    if (!id) {
+      id = await ensureInvoiceForMonth(tx, userId, options.targetId, month);
+      invoiceByMonth.set(month, id);
+    }
+    return id;
   }
 
-  const toInsert: TablesInsert<"transactions">[] = [];
+  const rows: Prisma.TransactionCreateManyInput[] = [];
   let duplicates = 0;
   let skipped = 0;
   const paymentInvoices = new Map<string, string>();
@@ -255,153 +414,183 @@ export async function commitImport(
 
     const categoryId = action === "invoice_payment" ? null : (decision?.categoryId ?? null);
     if (categoryId) {
-      const kind = categories.get(categoryId);
       const expected = action === "income" ? "income" : "expense";
-      if (kind !== expected) throw new ActionError(`Linha ${row.line}: a categoria não combina com o tipo.`);
+      if (categories.get(categoryId) !== expected) {
+        throw new ActionError(`Linha ${row.line}: a categoria não combina com o tipo.`);
+      }
     }
 
+    const installment = action === "expense" && options.target === "card" ? row.hints?.installment : undefined;
     const base = {
-      kind: action as Exclude<ImportAction, "skip">,
+      user_id: userId,
+      kind: action,
       status: "paid" as const,
       amount_cents: row.amountCents,
-      occurred_on: row.occurredOn,
+      occurred_on: dbDate(row.occurredOn),
       description: row.description,
       category_id: categoryId,
       external_id: row.externalId,
       dedupe_key: row.dedupeKey,
+      // Só saídas levam forma de pagamento; no cartão é sempre crédito.
+      payment_method:
+        action === "expense"
+          ? options.target === "card"
+            ? ("credit_card" as const)
+            : row.paymentMethod === "credit_card"
+              ? null
+              : row.paymentMethod
+          : null,
+      ...(installment
+        ? {
+            installment_group_id: groupUuid(userId, scope, installment.groupKey),
+            installment_number: installment.number,
+            installment_total: installment.total,
+          }
+        : {}),
     };
 
     if (options.target === "card") {
-      toInsert.push({ ...base, credit_card_id: options.targetId, invoice_id: cardInvoiceId });
+      rows.push({ ...base, credit_card_id: options.targetId, invoice_id: await cardInvoiceFor(row.occurredOn) });
     } else if (action === "invoice_payment") {
       if (!options.paymentCardId) {
         throw new ActionError(`Linha ${row.line}: escolha o cartão abatido pelos pagamentos de fatura.`);
       }
-      const invoiceId = await invoiceForPayment(ctx, options.paymentCardId, row.occurredOn, paymentInvoices);
-      toInsert.push({ ...base, account_id: options.targetId, credit_card_id: options.paymentCardId, invoice_id: invoiceId });
+      const invoiceId = await invoiceForPayment(tx, userId, options.paymentCardId, row.occurredOn, paymentInvoices);
+      rows.push({ ...base, account_id: options.targetId, credit_card_id: options.paymentCardId, invoice_id: invoiceId });
     } else {
-      toInsert.push({ ...base, account_id: options.targetId });
+      rows.push({ ...base, account_id: options.targetId });
     }
   }
 
-  if (toInsert.length === 0) throw new ActionError("Nenhuma linha selecionada para importar.");
+  if (rows.length === 0) throw new ActionError("Nenhuma linha selecionada para importar.");
 
-  const format = preview.format;
-  const { data: batch, error: batchError } = await ctx.supabase
-    .from("import_batches")
-    .insert({
-      format,
+  const batch = await tx.importBatch.create({
+    data: {
+      user_id: userId,
+      format: preview.format,
       file_name: preview.fileName,
       file_sha256: preview.fileSha256,
       account_id: options.target === "account" ? options.targetId : null,
       credit_card_id: options.target === "card" ? options.targetId : null,
       invoice_id: cardInvoiceId,
       total_rows: preview.rows.length + preview.errors.length,
-      duplicate_count: duplicates,
       skipped_count: skipped,
       error_count: preview.errors.length,
-      // Só número da linha e motivo; nada do conteúdo do arquivo.
+      // Só número da linha e motivo; nada do conteúdo da fonte.
       errors: preview.errors.slice(0, 200),
-    })
-    .select("id")
-    .single();
-  if (batchError || !batch) throw new ActionError("Não foi possível registrar a importação.");
+    },
+    select: { id: true },
+  });
 
-  // Funções da Vercel têm tempo limitado: insere em lotes e desfaz tudo se falhar.
   let imported = 0;
-  for (let i = 0; i < toInsert.length; i += 500) {
-    const chunk = toInsert.slice(i, i + 500).map((row) => ({ ...row, import_batch_id: batch.id }));
-    const { error, count } = await ctx.supabase
-      .from("transactions")
-      .upsert(chunk, { onConflict: "user_id,dedupe_key", ignoreDuplicates: true, count: "exact" });
-    if (error) {
-      await ctx.supabase.from("transactions").delete().eq("import_batch_id", batch.id);
-      await ctx.supabase.from("import_batches").delete().eq("id", batch.id);
-      console.error("[import] falha ao inserir:", error.code);
-      throw new ActionError("Não foi possível gravar as transações. Nada foi importado.");
-    }
-    imported += count ?? chunk.length;
+  for (let i = 0; i < rows.length; i += 500) {
+    const chunk = rows.slice(i, i + 500).map((r) => ({ ...r, import_batch_id: batch.id }));
+    // skipDuplicates: linhas gravadas por outra importação entre a prévia e agora.
+    imported += (await tx.transaction.createMany({ data: chunk, skipDuplicates: true })).count;
   }
 
-  // Linhas que outra importação gravou entre a prévia e agora contam como duplicatas.
-  const raced = toInsert.length - imported;
-  await ctx.supabase
-    .from("import_batches")
-    .update({ imported_count: imported, duplicate_count: duplicates + raced })
-    .eq("id", batch.id);
+  const raced = rows.length - imported;
+  await tx.importBatch.update({
+    where: { id: batch.id },
+    data: { imported_count: imported, duplicate_count: duplicates + raced },
+  });
 
   return { batchId: batch.id, imported, duplicates: duplicates + raced, skipped, errors: preview.errors.length };
 }
 
-async function loadCategoryKinds(ctx: AuthContext) {
-  const { data } = await ctx.supabase.from("categories").select("id, kind");
-  return new Map((data ?? []).map((c) => [c.id, c.kind]));
-}
-
-async function ensureInvoiceForMonth(ctx: AuthContext, cardId: string, month: string): Promise<string> {
-  const { data: card } = await ctx.supabase
-    .from("credit_cards")
-    .select("closing_day, due_day")
-    .eq("id", cardId)
-    .maybeSingle();
+async function ensureInvoiceForMonth(tx: Tx, userId: string, cardId: string, month: string): Promise<string> {
+  const card = await tx.creditCard.findFirst({
+    where: { id: cardId, user_id: userId },
+    select: { closing_day: true, due_day: true },
+  });
   if (!card) throw new ActionError("Cartão não encontrado.");
-  const dates = invoiceDatesFor(month, card.closing_day, card.due_day);
-  const { error } = await ctx.supabase.from("credit_card_invoices").upsert(
-    {
-      credit_card_id: cardId,
-      reference_month: dates.referenceMonth,
-      closing_date: dates.closingDate,
-      due_date: dates.dueDate,
-    },
-    { onConflict: "credit_card_id,reference_month", ignoreDuplicates: true },
-  );
-  if (error) throw new ActionError("Não foi possível criar a fatura.");
-  const { data } = await ctx.supabase
-    .from("credit_card_invoices")
-    .select("id")
-    .eq("credit_card_id", cardId)
-    .eq("reference_month", dates.referenceMonth)
-    .single();
-  if (!data) throw new ActionError("Não foi possível localizar a fatura.");
-  return data.id;
+  const [id] = await ensureInvoices(tx, userId, cardId, [invoiceDatesFor(month, card.closing_day, card.due_day)]);
+  return id;
 }
 
 /** Um pagamento quita a fatura que fechou mais recentemente até a data dele. */
-async function invoiceForPayment(ctx: AuthContext, cardId: string, paidOn: string, cache: Map<string, string>) {
-  const { data: card } = await ctx.supabase
-    .from("credit_cards")
-    .select("closing_day, due_day")
-    .eq("id", cardId)
-    .maybeSingle();
+async function invoiceForPayment(tx: Tx, userId: string, cardId: string, paidOn: string, cache: Map<string, string>) {
+  const card = await tx.creditCard.findFirst({
+    where: { id: cardId, user_id: userId },
+    select: { closing_day: true, due_day: true },
+  });
   if (!card) throw new ActionError("Cartão de pagamento não encontrado.");
   const month = monthOf(paidOn);
   const closing = invoiceDatesFor(month, card.closing_day, card.due_day).closingDate;
   const invoiceMonth = paidOn >= closing ? month : addMonthsToMonth(month, -1);
   const cached = cache.get(invoiceMonth);
   if (cached) return cached;
-  const id = await ensureInvoiceForMonth(ctx, cardId, invoiceMonth);
+  const id = await ensureInvoiceForMonth(tx, userId, cardId, invoiceMonth);
   cache.set(invoiceMonth, id);
   return id;
 }
 
 /** Remove só as transações criadas por esta importação. Lançamentos manuais ficam. */
 export async function undoImportBatch(ctx: AuthContext, batchId: string) {
-  const { data: batch } = await ctx.supabase
-    .from("import_batches")
-    .select("id, status")
-    .eq("id", batchId)
-    .maybeSingle();
-  if (!batch) throw new ActionError("Importação não encontrada.");
-  if (batch.status === "undone") throw new ActionError("Esta importação já foi desfeita.");
+  const userId = ctx.user.id;
+  return ctx.db(async (tx) => {
+    const batch = await tx.importBatch.findFirst({ where: { id: batchId, user_id: userId }, select: { status: true } });
+    if (!batch) throw new ActionError("Importação não encontrada.");
+    if (batch.status === "undone") throw new ActionError("Esta importação já foi desfeita.");
+    const { count } = await tx.transaction.deleteMany({ where: { user_id: userId, import_batch_id: batchId } });
+    await tx.importBatch.update({ where: { id: batchId }, data: { status: "undone", undone_at: new Date() } });
+    return { removed: count };
+  });
+}
 
-  const { error, count } = await ctx.supabase
-    .from("transactions")
-    .delete({ count: "exact" })
-    .eq("import_batch_id", batchId);
-  if (error) throw new ActionError("Não foi possível remover as transações importadas.");
-  await ctx.supabase
-    .from("import_batches")
-    .update({ status: "undone", undone_at: new Date().toISOString() })
-    .eq("id", batchId);
-  return { removed: count ?? 0 };
+/**
+ * Faz o saldo calculado da conta bater com o saldo informado pelo banco,
+ * ajustando o saldo inicial (o histórico importado costuma ser parcial).
+ * Só lançamentos efetivados entram na conta; pendentes não mudam o saldo.
+ */
+export async function reconcileWithBankBalance(ctx: AuthContext, accountId: string, bankBalanceCents: number) {
+  return ctx.db(async (tx) => {
+    const account = await tx.bankAccount.findFirst({
+      where: { id: accountId, user_id: ctx.user.id },
+      select: { initial_balance_cents: true },
+    });
+    if (!account) throw new ActionError("Conta não encontrada.");
+    const movements = (await accountBalances(tx, ctx.user.id)).get(accountId) ?? 0;
+    const initial = bankBalanceCents - movements;
+    if (initial !== account.initial_balance_cents) {
+      await tx.bankAccount.update({ where: { id: accountId }, data: { initial_balance_cents: initial } });
+    }
+    return { previousCents: account.initial_balance_cents + movements, balanceCents: bankBalanceCents };
+  });
+}
+
+/**
+ * Apaga tudo o que veio de importações (Open Finance e arquivos) e marca as
+ * importações como desfeitas. Lançamentos manuais, contas, cartões e
+ * categorias ficam. O saldo atual de cada conta é preservado: o saldo inicial
+ * é ajustado para compensar as movimentações removidas.
+ */
+export async function clearImportedData(ctx: AuthContext) {
+  const userId = ctx.user.id;
+  return ctx.db(
+    async (tx) => {
+      const before = await accountBalances(tx, userId);
+      const accounts = await tx.bankAccount.findMany({ where: { user_id: userId }, select: { id: true, initial_balance_cents: true } });
+
+      const { count: removed } = await tx.transaction.deleteMany({
+        where: { user_id: userId, OR: [{ import_batch_id: { not: null } }, { dedupe_key: { startsWith: "adjust:" } }] },
+      });
+      const { count: batches } = await tx.importBatch.updateMany({
+        where: { user_id: userId, status: "completed" },
+        data: { status: "undone", undone_at: new Date() },
+      });
+      await tx.creditCardInvoice.updateMany({ where: { user_id: userId }, data: { bank_amount_cents: null } });
+
+      const after = await accountBalances(tx, userId);
+      for (const a of accounts) {
+        const current = a.initial_balance_cents + (before.get(a.id) ?? 0);
+        const initial = current - (after.get(a.id) ?? 0);
+        if (initial !== a.initial_balance_cents) {
+          await tx.bankAccount.update({ where: { id: a.id }, data: { initial_balance_cents: initial } });
+        }
+      }
+      return { removed, batches };
+    },
+    { timeoutMs: 45_000 },
+  );
 }

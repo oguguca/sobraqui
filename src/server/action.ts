@@ -1,6 +1,5 @@
 import "server-only";
 
-import type { PostgrestError } from "@supabase/supabase-js";
 import { refresh } from "next/cache";
 import { z } from "zod";
 
@@ -40,29 +39,47 @@ export function authedAction<S extends z.ZodType, T>(
       refresh();
       return { ok: true, data, message: options.message };
     } catch (err) {
-      if (err instanceof ActionError) return { ok: false, error: err.message };
-      // Loga só o código/mensagem técnica, nunca a entrada (pode ter dados financeiros).
-      console.error("[action]", err instanceof Error ? err.message : "erro desconhecido");
-      return { ok: false, error: "Não foi possível concluir a operação. Tente de novo." };
+      return { ok: false, error: errorMessage(err) };
     }
   };
 }
 
-/** Lança ActionError com mensagem amigável para erros conhecidos do PostgREST. */
-export function check(error: PostgrestError | null, context = "salvar"): void {
-  if (!error) return;
-  if (error.code === "23505") throw new ActionError("Já existe um registro com esses dados.");
-  if (error.code === "23503") {
-    throw new ActionError("Este registro está em uso por outros lançamentos. Arquive em vez de excluir.");
+/** Código SQLSTATE do Postgres, quando o erro veio do banco (direto ou via Prisma). */
+export function sqlState(err: unknown): string | undefined {
+  const e = err as { code?: unknown; meta?: { driverAdapterError?: { cause?: { originalCode?: unknown } } } };
+  const original = e?.meta?.driverAdapterError?.cause?.originalCode;
+  if (typeof original === "string") return original;
+  const prismaToSql: Record<string, string> = { P2002: "23505", P2003: "23503", P2004: "23514" };
+  return typeof e?.code === "string" ? (prismaToSql[e.code] ?? (/^\d{5}$/.test(e.code) ? e.code : undefined)) : undefined;
+}
+
+/** Mensagem segura para o usuário. Loga só o código técnico, nunca dados. */
+export function errorMessage(err: unknown): string {
+  if (err instanceof ActionError) return err.message;
+  switch (sqlState(err)) {
+    case "23505":
+      return "Já existe um registro com esses dados.";
+    case "23503":
+    case "23001": // ON DELETE RESTRICT
+      return "Este registro está em uso por outros lançamentos. Arquive em vez de excluir.";
+    case "23514":
+      return "Os dados não respeitam as regras do lançamento.";
+    case "42501":
+      return "Você não tem permissão para esta operação.";
   }
-  if (error.code === "23514") throw new ActionError("Os dados não respeitam as regras do lançamento.");
-  if (error.code === "42501") throw new ActionError("Você não tem permissão para esta operação.");
-  console.error(`[db] falha ao ${context}:`, error.code, error.message);
-  throw new ActionError(`Não foi possível ${context}.`);
+  const code = (err as { code?: unknown })?.code;
+  console.error("[action]", typeof code === "string" ? code : err instanceof Error ? err.name : "erro desconhecido");
+  return "Não foi possível concluir a operação. Tente de novo.";
 }
 
 /** Lança se a consulta não encontrou o registro (RLS também cai aqui). */
-export function found<T>(row: T | null, what = "Registro"): T {
+export function found<T>(row: T | null | undefined, what = "Registro"): T {
   if (!row) throw new ActionError(`${what} não encontrado.`);
   return row;
+}
+
+/** Para updateMany/deleteMany: zero linhas afetadas = não encontrado. */
+export function affected(result: { count: number }, what = "Registro"): { count: number } {
+  if (result.count === 0) throw new ActionError(`${what} não encontrado.`);
+  return result;
 }
