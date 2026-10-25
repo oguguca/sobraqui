@@ -61,22 +61,23 @@
 
 :root {
   /* Paleta Sobraqui: Berinjela #2B1640, Lima #C8F04A (só sobre escuro), Tinta #1A0E26,
-     Papel #F7F6F1, Lilás #9B7BEA (destaque sobre claro), Coral #F2664B (gastos, alertas). */
+     Papel #F7F6F1, Lilás #9B7BEA (destaque sobre claro), Coral #F2664B (gastos, alertas).
+     Base neutra (papel e cinzas); o roxo fica para ação, seleção, marca e entradas. */
   --radius: 1.125rem;
   --background: #f7f6f1;
-  --foreground: #1a0e26;
+  --foreground: #1c1a1f;
   --card: #ffffff;
-  --card-foreground: #1a0e26;
+  --card-foreground: #1c1a1f;
   --popover: #ffffff;
-  --popover-foreground: #1a0e26;
+  --popover-foreground: #1c1a1f;
   --primary: #2b1640;
   --primary-foreground: #ffffff;
-  --secondary: #efedf3;
-  --secondary-foreground: #2b1640;
-  --muted: #efede7;
-  --muted-foreground: #6b6275;
-  --accent: #efe9fc;
-  --accent-foreground: #2b1640;
+  --secondary: #efeee9;
+  --secondary-foreground: #1c1a1f;
+  --muted: #efeee9;
+  --muted-foreground: #6b6872;
+  --accent: #efeee9;
+  --accent-foreground: #1c1a1f;
   --destructive: #c8432b;
   --border: #e7e4dc;
   --input: #dedad1;
@@ -90,12 +91,12 @@
   --negative-soft: #fdebe7;
   --warning: #b7791f;
   --warning-soft: #fdf3dc;
-  --brand-soft: #e9e2fb;
+  --brand-soft: #f1eff9;
   --brand-strong: #2b1640;
   --chart-income: #6b4fd8;
   --chart-expense: #e5553a;
   --chart-balance: #6b4fd8;
-  --chart-bar: #d9cdf7;
+  --chart-bar: #e4e2dc;
   --chart-grid: #ebe8e0;
   --chart-1: #6b4fd8;
   --chart-2: #e5553a;
@@ -103,34 +104,34 @@
   --chart-4: #b7791f;
   --chart-5: #9b7bea;
   --sidebar: #ffffff;
-  --sidebar-foreground: #3a2c48;
+  --sidebar-foreground: #3b3940;
   --sidebar-primary: #2b1640;
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: #efe9fc;
-  --sidebar-accent-foreground: #2b1640;
+  --sidebar-accent: #efeee9;
+  --sidebar-accent-foreground: #1c1a1f;
   --sidebar-border: #e7e4dc;
   --sidebar-ring: #9b7bea;
 }
 
 .dark {
-  --background: #1a0e26;
-  --foreground: #f7f6f1;
-  --card: #24152f;
-  --card-foreground: #f7f6f1;
-  --popover: #2b1a38;
-  --popover-foreground: #f7f6f1;
-  /* No escuro, botões em lilás (berinjela some no fundo); lima marca o que sobra. */
+  --background: #111113;
+  --foreground: #f4f4f2;
+  --card: #19191c;
+  --card-foreground: #f4f4f2;
+  --popover: #1f1f23;
+  --popover-foreground: #f4f4f2;
+  /* Escuro em grafite neutro (fundo, cartões e barra lateral). Botões em lilás; lima marca o que sobra. */
   --primary: #9b7bea;
-  --primary-foreground: #1a0e26;
-  --secondary: #2f1e3d;
-  --secondary-foreground: #f7f6f1;
-  --muted: #2f1e3d;
-  --muted-foreground: #b3a9be;
-  --accent: #35224a;
-  --accent-foreground: #f7f6f1;
+  --primary-foreground: #111113;
+  --secondary: #232327;
+  --secondary-foreground: #f4f4f2;
+  --muted: #232327;
+  --muted-foreground: #a3a3ab;
+  --accent: #26262b;
+  --accent-foreground: #f4f4f2;
   --destructive: #f2664b;
-  --border: rgb(247 246 241 / 9%);
-  --input: rgb(247 246 241 / 14%);
+  --border: rgb(255 255 255 / 8%);
+  --input: rgb(255 255 255 / 13%);
   --ring: #9b7bea;
   --brand-accent: #c8f04a;
   --brand-dot: #c8f04a;
@@ -140,25 +141,25 @@
   --negative-soft: rgb(242 102 75 / 16%);
   --warning: #f0b955;
   --warning-soft: rgb(240 185 85 / 14%);
-  --brand-soft: #35224a;
+  --brand-soft: #24222b;
   --brand-strong: #c8f04a;
   --chart-income: #9b7bea;
   --chart-expense: #e5553a;
   --chart-balance: #9b7bea;
-  --chart-bar: #4a3363;
-  --chart-grid: rgb(247 246 241 / 8%);
+  --chart-bar: #2f2f35;
+  --chart-grid: rgb(255 255 255 / 7%);
   --chart-1: #9b7bea;
   --chart-2: #e5553a;
   --chart-3: #c8f04a;
   --chart-4: #f0b955;
   --chart-5: #b9a3f0;
-  --sidebar: #20122d;
-  --sidebar-foreground: #e9e5ee;
+  --sidebar: #141416;
+  --sidebar-foreground: #e4e4e7;
   --sidebar-primary: #9b7bea;
-  --sidebar-primary-foreground: #1a0e26;
-  --sidebar-accent: #35224a;
-  --sidebar-accent-foreground: #f7f6f1;
-  --sidebar-border: rgb(247 246 241 / 8%);
+  --sidebar-primary-foreground: #111113;
+  --sidebar-accent: #232327;
+  --sidebar-accent-foreground: #f4f4f2;
+  --sidebar-border: rgb(255 255 255 / 7%);
   --sidebar-ring: #9b7bea;
 }
 

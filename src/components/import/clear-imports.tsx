@@ -32,7 +32,7 @@ export function ClearImports({ importedCount }: { importedCount: number }) {
         <div>
           <p className="font-medium">Limpar dados importados</p>
           <p className="text-sm text-muted-foreground">
-            Remove as {importedCount} transação(ões) que vieram de importações e sincronizações. Lançamentos feitos à mão,
+            Remove as {importedCount} transação(ões) que vieram de importações de extrato. Lançamentos feitos à mão,
             contas, cartões e categorias ficam, e o saldo das contas é mantido.
           </p>
         </div>
@@ -53,7 +53,7 @@ export function ClearImports({ importedCount }: { importedCount: number }) {
               <AlertDialogTitle>Apagar todos os dados importados?</AlertDialogTitle>
               <AlertDialogDescription>
                 {importedCount} transação(ões) importada(s) serão excluídas, e os ajustes de fatura informados serão
-                removidos. Não dá para desfazer. Você pode sincronizar de novo depois, se quiser.
+                removidos. Não dá para desfazer. Você pode importar os extratos de novo depois, se quiser.
               </AlertDialogDescription>
             </AlertDialogHeader>
             <div className="grid gap-1.5">

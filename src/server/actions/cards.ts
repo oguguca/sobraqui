@@ -129,7 +129,7 @@ export const payInvoice = authedAction(
 
 /**
  * Valor da fatura conforme o app do banco. A diferença para os lançamentos
- * vira um ajuste ("juros e encargos"), recalculado a cada sincronização.
+ * vira um ajuste ("juros e encargos"), recalculado ao importar a fatura.
  * Vazio remove o ajuste.
  */
 export const setInvoiceBankAmount = authedAction(

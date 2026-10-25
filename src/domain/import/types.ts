@@ -18,7 +18,7 @@ export type RawRecord = {
   externalId: string | null;
   /** Categoria informada pelo banco, quando existe (só para sugestão). */
   rawCategory: string | null;
-  /** Classificação já conhecida pela fonte (ex.: Open Finance), que vence as heurísticas. */
+  /** Classificação já conhecida pela fonte (ex.: arquivo que já diz o tipo), que vence as heurísticas. */
   hints?: RecordHints;
 };
 

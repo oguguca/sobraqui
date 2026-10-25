@@ -123,7 +123,7 @@ export const INVOICE_STATUS_LABEL: Record<InvoiceStatus, string> = {
 
 /**
  * Ciclo da fatura aberta hoje: do último fechamento (compras desse dia já
- * entram nela) até o vencimento dela. É o período padrão das sincronizações.
+ * entram nela) até o vencimento dela. Período da fatura aberta.
  */
 export function openInvoiceCycle(
   today: ISODate,

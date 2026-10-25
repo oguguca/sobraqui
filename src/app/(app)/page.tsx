@@ -56,15 +56,15 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
         <h1 className="mb-6 text-3xl font-semibold tracking-tight">Bem-vindo{firstName ? `, ${firstName}` : ""}</h1>
         <EmptyState
           icon={Landmark}
-          title="Comece conectando seu banco"
-          description="O dashboard é montado a partir dos seus lançamentos. Sincronize o Nubank pelo Open Finance ou cadastre uma conta."
+          title="Comece cadastrando sua conta"
+          description="O dashboard é montado a partir dos seus lançamentos. Cadastre uma conta e lance à mão ou importe o extrato do banco (CSV ou OFX)."
           action={
             <div className="flex flex-wrap justify-center gap-2">
               <Button asChild>
-                <Link href="/importacao">Conectar Nubank</Link>
+                <Link href="/contas">Cadastrar conta</Link>
               </Button>
               <Button variant="outline" asChild>
-                <Link href="/contas">Cadastrar conta</Link>
+                <Link href="/importacao">Importar extrato</Link>
               </Button>
             </div>
           }
@@ -143,7 +143,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
                   className="py-8"
                   action={
                     <Button size="sm" variant="outline" asChild>
-                      <Link href="/importacao">Sincronizar cartão</Link>
+                      <Link href="/cartoes">Cadastrar cartão</Link>
                     </Button>
                   }
                 />

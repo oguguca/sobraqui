@@ -91,7 +91,7 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
       <div className="mb-6 grid gap-4 sm:grid-cols-3">
         <Card>
           <CardContent>
-            <p className="text-sm text-muted-foreground">Limite disponível{card.bank_synced_at ? " · pelo banco" : ""}</p>
+            <p className="text-sm text-muted-foreground">Limite disponível</p>
             <Money cents={card.available_cents} tone={card.available_cents < 0 ? "negative" : "neutral"} className="mt-1 block text-2xl font-semibold" />
             <p className="mt-1 text-xs text-muted-foreground">de {formatMoney(card.limit_cents)}</p>
           </CardContent>
@@ -101,7 +101,7 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
             <p className="text-sm text-muted-foreground">Comprometido no cartão</p>
             <Money cents={Math.max(0, card.used_cents)} className="mt-1 block text-2xl font-semibold" />
             <p className="mt-1 text-xs text-muted-foreground">
-              {card.bank_synced_at ? "informado pelo banco: faturas, parcelas futuras e rotativo" : "faturas em aberto e parcelas futuras"}
+              faturas em aberto e parcelas futuras
             </p>
           </CardContent>
         </Card>

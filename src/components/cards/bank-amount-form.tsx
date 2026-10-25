@@ -40,7 +40,7 @@ export function BankAmountForm({ invoiceId, bankAmountCents }: { invoiceId: stri
       </div>
       <p className="text-xs text-muted-foreground">
         {fieldErrors.amount ??
-          "Opcional. A diferença vira “juros e encargos (ajuste)” e diminui sozinha quando os encargos chegarem pelo Open Finance. Deixe vazio para remover."}
+          "Opcional. A diferença vira “juros e encargos (ajuste)” e é recalculada quando você importa a fatura. Deixe vazio para remover."}
       </p>
     </form>
   );

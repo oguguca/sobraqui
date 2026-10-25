@@ -5,14 +5,9 @@ import { ClearImports } from "@/components/import/clear-imports";
 import { ResetEverything } from "@/components/settings/reset-everything";
 import { ImportHistory } from "@/components/import/import-history";
 import { ImportWizard } from "@/components/import/import-wizard";
-import { OpenFinanceSync } from "@/components/import/open-finance-sync";
 import { EmptyState, PageHeader } from "@/components/shared";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { errorMessage } from "@/server/action";
-import { openInvoiceCycle } from "@/domain/credit-card";
-import { monthOf, monthStart } from "@/domain/dates";
 import { requireAuth } from "@/server/auth";
-import { isPluggyConfigured, listPluggyAccounts } from "@/server/pluggy";
 import { loadLedgerContext } from "@/server/queries/context";
 
 export const metadata: Metadata = { title: "Importação" };
@@ -27,21 +22,6 @@ export default async function ImportPage() {
     ctx.db((tx) => tx.transaction.count({ where: { user_id: ctx.user.id, import_batch_id: { not: null } } })),
   ]);
   const targets = { ...ledger.lookups.accounts, ...ledger.lookups.cards };
-  const firstCard = ledger.activeCards[0];
-  const cycle = firstCard ? openInvoiceCycle(ledger.today, firstCard.closing_day, firstCard.due_day) : null;
-  const cycleRange = cycle
-    ? { from: cycle.from, to: cycle.to }
-    : { from: monthStart(monthOf(ledger.today)), to: ledger.today };
-
-  // Open Finance: falha na Pluggy não derruba a página; só mostra o aviso.
-  let openFinance: { accounts: Awaited<ReturnType<typeof listPluggyAccounts>> } | { error: string } | null = null;
-  if (isPluggyConfigured()) {
-    try {
-      openFinance = { accounts: await listPluggyAccounts() };
-    } catch (err) {
-      openFinance = { error: errorMessage(err) };
-    }
-  }
 
   return (
     <>
@@ -49,28 +29,6 @@ export default async function ImportPage() {
         title="Importação bancária"
         description="Importe extratos e faturas exportados pelo app do banco. Nunca pedimos sua senha bancária."
       />
-      {openFinance && (
-        <div className="mb-6">
-          {"error" in openFinance ? (
-            <p className="rounded-lg border border-destructive/40 p-4 text-sm text-destructive">{openFinance.error}</p>
-          ) : (
-            <OpenFinanceSync
-              accounts={openFinance.accounts.map(({ id, type, subtype, name, marketingName, number, balance }) => ({
-                id,
-                type,
-                subtype,
-                name,
-                marketingName,
-                number,
-                balance,
-              }))}
-              options={ledger.formOptions}
-              today={ledger.today}
-              defaultRange={cycleRange}
-            />
-          )}
-        </div>
-      )}
 
       <h2 className="mb-3 text-lg font-semibold tracking-tight">Importar arquivo (CSV ou OFX)</h2>
       <div className="grid gap-6 xl:grid-cols-[1fr_340px]">

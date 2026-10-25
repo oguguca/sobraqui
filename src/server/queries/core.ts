@@ -117,12 +117,6 @@ export async function listCards(ctx: AuthContext, opts: { includeArchived?: bool
       cardUsage(tx, userId),
     ]);
     return cards.map((c) => {
-      // Cartão sincronizado pelo Open Finance: o banco sabe o limite real (inclui
-      // parcelas futuras e rotativo que não foram importados).
-      if (c.bank_available_cents !== null) {
-        const used = c.bank_used_cents ?? c.limit_cents - c.bank_available_cents;
-        return { ...c, used_cents: used, available_cents: c.bank_available_cents };
-      }
       const used = usage.get(c.id) ?? 0;
       return { ...c, used_cents: used, available_cents: c.limit_cents - used };
     });

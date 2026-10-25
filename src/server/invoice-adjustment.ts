@@ -10,8 +10,8 @@ const adjustmentKey = (invoiceId: string) => `adjust:invoice:${invoiceId}`;
 
 /**
  * Mantém a fatura igual ao valor informado pelo banco: lança (ou corrige) um
- * único ajuste com a diferença. Quando os encargos reais chegam pela
- * sincronização, a diferença diminui e o ajuste encolhe ou some.
+ * único ajuste com a diferença. Ao importar a fatura (ou salvar o valor de novo),
+ * a diferença é recalculada e o ajuste encolhe ou some.
  */
 export async function recomputeInvoiceAdjustment(tx: Tx, userId: string, invoiceId: string): Promise<number> {
   const invoice = await tx.creditCardInvoice.findFirst({
@@ -37,7 +37,7 @@ export async function recomputeInvoiceAdjustment(tx: Tx, userId: string, invoice
       // Véspera do fechamento: dentro do período da fatura.
       occurred_on: dbDate(addDays(invoice.closing_date, -1)),
       description: ADJUSTMENT_DESCRIPTION,
-      notes: "Diferença entre o valor informado do app do banco e os lançamentos recebidos. Recalculada a cada sincronização.",
+      notes: "Diferença entre o valor informado do app do banco e os lançamentos recebidos. Recalculada quando o valor informado muda ou a fatura é importada.",
       payment_method: diff > 0 ? "credit_card" : null,
       credit_card_id: invoice.credit_card_id,
       invoice_id: invoice.id,

@@ -4,10 +4,9 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { invoiceDatesFor, invoiceForPurchase } from "@/domain/credit-card";
-import { addMonthsToMonth, formatDate, isISOMonth, monthOf } from "@/domain/dates";
+import { addMonthsToMonth, isISOMonth, monthOf } from "@/domain/dates";
 import { buildPreview, parseStatementFile, type ManualCandidate } from "@/domain/import/pipeline";
 import { categoryFromDescription } from "@/domain/import/merchant-rules";
-import { mapPluggyTransaction, unpaidBillCarryOver } from "@/domain/import/pluggy";
 import { normalizeText } from "@/domain/import/text";
 import {
   MAX_IMPORT_BYTES,
@@ -23,8 +22,8 @@ import type { Prisma } from "@/generated/prisma/client";
 import { ActionError } from "@/server/action";
 import type { AuthContext } from "@/server/auth";
 import { dbDate, type Tx } from "@/server/db";
+import { recomputeInvoiceAdjustment } from "@/server/invoice-adjustment";
 import { ensureInvoices } from "@/server/invoices";
-import { getPluggyAccount, listPluggyBills, listPluggyTransactions } from "@/server/pluggy";
 import { accountBalances, fetchAll } from "@/server/queries/core";
 
 const mappingSchema = z.object({
@@ -41,10 +40,7 @@ export const importOptionsSchema = z.object({
   target: z.enum(["account", "card"]),
   targetId: z.uuid("Escolha a conta ou o cartão de destino."),
   mapping: mappingSchema.nullable().default(null),
-  /**
-   * Fatura que recebe todas as compras de um arquivo de cartão (AAAA-MM).
-   * Na sincronização por Open Finance fica nulo: cada compra vai para a fatura da sua data.
-   */
+  /** Fatura que recebe todas as compras de um arquivo de cartão (AAAA-MM). Obrigatória no cartão. */
   invoiceMonth: z.string().refine(isISOMonth).nullable().default(null),
   /** Cartão abatido pelas linhas "pagamento de fatura" de um extrato de conta. */
   paymentCardId: z.uuid().nullable().default(null),
@@ -80,7 +76,7 @@ export type PreviewResult =
 
 type Upload = { bytes: Uint8Array; name: string };
 
-/** Registros já lidos de uma fonte (arquivo ou Open Finance), prontos para a prévia. */
+/** Registros já lidos de um arquivo, prontos para a prévia. */
 export type ImportSource = {
   format: ImportFormat;
   fileName: string;
@@ -88,8 +84,6 @@ export type ImportSource = {
   records: RawRecord[];
   errors: RowError[];
   detectedTarget: ImportTarget | null;
-  /** Cartão: o banco já enviou o lançamento do rotativo (dispensa o nosso "saldo não pago"). */
-  bankCarriesOver?: boolean;
 };
 
 export async function readUpload(file: unknown): Promise<Upload> {
@@ -120,42 +114,6 @@ export function sourceFromUpload(
     records: parsed.records,
     errors: parsed.errors,
     detectedTarget: parsed.detectedTarget,
-  };
-}
-
-/** Busca na Pluggy as transações da conta/cartão do Open Finance no período. */
-export async function sourceFromPluggy(pluggyAccountId: string, from: string, to: string): Promise<ImportSource> {
-  const account = await getPluggyAccount(pluggyAccountId);
-  const transactions = await listPluggyTransactions(account.id, from, to);
-  const records: RawRecord[] = [];
-  const errors: RowError[] = [];
-  transactions.forEach((t, i) => {
-    const record = mapPluggyTransaction(t, account.type, i + 1);
-    if (record) records.push(record);
-    else errors.push({ line: i + 1, reason: "Transação sem data ou valor válido." });
-  });
-  // Cartão: saldo não pago de faturas fechadas no período vai para a fatura seguinte,
-  // a menos que o próprio banco já mande o lançamento do rotativo.
-  const bankCarriesOver = transactions.some((t) => t.amount > 0 && /rotativo|saldo (anterior|em atraso)/i.test(t.description));
-  if (account.type === "CREDIT" && !bankCarriesOver) {
-    for (const bill of await listPluggyBills(account.id)) {
-      const closing = bill.billClosingDate?.slice(0, 10);
-      if (!closing || closing < from || closing > to) continue;
-      const carry = unpaidBillCarryOver(bill, transactions.length + records.length + 1);
-      if (carry) records.push(carry);
-    }
-  }
-  if (records.length === 0) throw new ActionError("Nenhuma transação nesse período.");
-  const ids = transactions.map((t) => t.id).sort();
-  const label = account.type === "CREDIT" ? "cartão" : "conta";
-  return {
-    format: "pluggy",
-    fileName: `Open Finance · ${account.marketingName ?? account.name} (${label}) · ${formatDate(from)} a ${formatDate(to)}`.slice(0, 255),
-    sha256: createHash("sha256").update(ids.join(",")).digest("hex"),
-    records,
-    errors,
-    detectedTarget: account.type === "CREDIT" ? "card" : "account",
-    bankCarriesOver,
   };
 }
 
@@ -220,7 +178,7 @@ async function previewInTx(
   });
 
   let suggestedInvoiceMonth: string | null = null;
-  if (options.target === "card" && source.format !== "pluggy") {
+  if (options.target === "card") {
     const card = await tx.creditCard.findFirst({
       where: { id: options.targetId, user_id: userId },
       select: { closing_day: true, due_day: true },
@@ -344,7 +302,7 @@ export async function commitImport(
   return ctx.db((tx) => commitInTx(tx, ctx.user.id, source, options, decisions), { timeoutMs: 45_000 });
 }
 
-/** UUID determinístico: as parcelas de uma compra caem sempre no mesmo grupo, mesmo em sincronizações diferentes. */
+/** UUID determinístico: as parcelas de uma compra caem sempre no mesmo grupo, mesmo em importações diferentes. */
 function groupUuid(userId: string, scope: string, key: string): string {
   const h = createHash("sha256").update(`${userId}|${scope}|${key}`).digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-5${h.slice(13, 16)}-${((parseInt(h[16], 16) & 3) | 8).toString(16)}${h.slice(17, 20)}-${h.slice(20, 32)}`;
@@ -367,31 +325,11 @@ async function commitInTx(
     (await tx.category.findMany({ where: { user_id: userId }, select: { id: true, kind: true } })).map((c) => [c.id, c.kind]),
   );
 
-  // Cartão: fatura única (arquivo de uma fatura) ou por data de cada compra (Open Finance).
+  // Cartão: um arquivo de fatura vai inteiro para a fatura escolhida.
   let cardInvoiceId: string | null = null;
-  let card: { closing_day: number; due_day: number } | null = null;
   if (options.target === "card") {
-    card = await tx.creditCard.findFirst({
-      where: { id: options.targetId, user_id: userId },
-      select: { closing_day: true, due_day: true },
-    });
-    if (!card) throw new ActionError("Cartão não encontrado.");
-    if (options.invoiceMonth) {
-      cardInvoiceId = await ensureInvoiceForMonth(tx, userId, options.targetId, options.invoiceMonth);
-    } else if (source.format !== "pluggy") {
-      throw new ActionError("Escolha a fatura que recebe estas compras.");
-    }
-  }
-  const invoiceByMonth = new Map<string, string>();
-  async function cardInvoiceFor(date: string): Promise<string> {
-    if (cardInvoiceId) return cardInvoiceId;
-    const month = monthOf(invoiceForPurchase(date, card!.closing_day, card!.due_day).referenceMonth);
-    let id = invoiceByMonth.get(month);
-    if (!id) {
-      id = await ensureInvoiceForMonth(tx, userId, options.targetId, month);
-      invoiceByMonth.set(month, id);
-    }
-    return id;
+    if (!options.invoiceMonth) throw new ActionError("Escolha a fatura que recebe estas compras.");
+    cardInvoiceId = await ensureInvoiceForMonth(tx, userId, options.targetId, options.invoiceMonth);
   }
 
   const rows: Prisma.TransactionCreateManyInput[] = [];
@@ -450,7 +388,7 @@ async function commitInTx(
     };
 
     if (options.target === "card") {
-      rows.push({ ...base, credit_card_id: options.targetId, invoice_id: await cardInvoiceFor(row.occurredOn) });
+      rows.push({ ...base, credit_card_id: options.targetId, invoice_id: cardInvoiceId });
     } else if (action === "invoice_payment") {
       if (!options.paymentCardId) {
         throw new ActionError(`Linha ${row.line}: escolha o cartão abatido pelos pagamentos de fatura.`);
@@ -488,6 +426,8 @@ async function commitInTx(
     // skipDuplicates: linhas gravadas por outra importação entre a prévia e agora.
     imported += (await tx.transaction.createMany({ data: chunk, skipDuplicates: true })).count;
   }
+  // Fatura com valor informado do app: o ajuste passa a cobrir só o que ainda falta.
+  if (cardInvoiceId) await recomputeInvoiceAdjustment(tx, userId, cardInvoiceId);
 
   const raced = rows.length - imported;
   await tx.importBatch.update({
@@ -539,28 +479,7 @@ export async function undoImportBatch(ctx: AuthContext, batchId: string) {
 }
 
 /**
- * Faz o saldo calculado da conta bater com o saldo informado pelo banco,
- * ajustando o saldo inicial (o histórico importado costuma ser parcial).
- * Só lançamentos efetivados entram na conta; pendentes não mudam o saldo.
- */
-export async function reconcileWithBankBalance(ctx: AuthContext, accountId: string, bankBalanceCents: number) {
-  return ctx.db(async (tx) => {
-    const account = await tx.bankAccount.findFirst({
-      where: { id: accountId, user_id: ctx.user.id },
-      select: { initial_balance_cents: true },
-    });
-    if (!account) throw new ActionError("Conta não encontrada.");
-    const movements = (await accountBalances(tx, ctx.user.id)).get(accountId) ?? 0;
-    const initial = bankBalanceCents - movements;
-    if (initial !== account.initial_balance_cents) {
-      await tx.bankAccount.update({ where: { id: accountId }, data: { initial_balance_cents: initial } });
-    }
-    return { previousCents: account.initial_balance_cents + movements, balanceCents: bankBalanceCents };
-  });
-}
-
-/**
- * Apaga tudo o que veio de importações (Open Finance e arquivos) e marca as
+ * Apaga tudo o que veio de importações de arquivo e marca as
  * importações como desfeitas. Lançamentos manuais, contas, cartões e
  * categorias ficam. O saldo atual de cada conta é preservado: o saldo inicial
  * é ajustado para compensar as movimentações removidas.
