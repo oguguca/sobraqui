@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 # Sobraqui
 
 Controle financeiro pessoal: contas, cartões e faturas, orçamento, metas, relatórios e importação de extratos (Nubank CSV/OFX).
@@ -69,3 +70,6 @@ Duas formas de trazer as movimentações, ambas com deduplicação, revisão ant
 2. **Arquivos CSV/OFX** exportados pelo app, para outros bancos ou quando não houver conexão.
 
 O Nubank não tem API pública para pessoa física, e nunca pedimos nem guardamos senha bancária.
+=======
+
+>>>>>>> 65f6890517b7aeb046a54d76144de62c0a982503

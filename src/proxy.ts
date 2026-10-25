@@ -1,7 +1,7 @@
 import { getSessionCookie } from "better-auth/cookies";
 import { NextResponse, type NextRequest } from "next/server";
 
-const PUBLIC_PATHS = ["/login", "/cadastro", "/recuperar-senha", "/redefinir-senha", "/api/auth"];
+const PUBLIC_PATHS = ["/sobre", "/login", "/cadastro", "/recuperar-senha", "/redefinir-senha", "/api/auth"];
 
 function isPublic(pathname: string) {
   return PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`));
@@ -18,6 +18,11 @@ export function proxy(request: NextRequest) {
       return NextResponse.json({ error: "Não autenticado." }, { status: 401 });
     }
     const url = request.nextUrl.clone();
+    // Quem chega sem sessão na raiz vê a apresentação do Sobraqui no mesmo endereço.
+    if (pathname === "/") {
+      url.pathname = "/sobre";
+      return NextResponse.rewrite(url);
+    }
     url.pathname = "/login";
     url.search = "";
     if (pathname !== "/") url.searchParams.set("next", pathname);

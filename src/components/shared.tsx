@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 
+import { MoneyCountUp } from "@/components/motion/money-count-up";
 import { formatMoney } from "@/domain/money";
 import { cn } from "@/lib/utils";
 
@@ -59,16 +60,18 @@ export function EmptyState({
 
 type Tone = "auto" | "positive" | "negative" | "neutral";
 
-/** Valor em reais. `tone="auto"` pinta pelo sinal. */
+/** Valor em reais. `tone="auto"` pinta pelo sinal; `animate` conta até o valor ao abrir. */
 export function Money({
   cents,
   tone = "neutral",
   signed = false,
+  animate = false,
   className,
 }: {
   cents: number;
   tone?: Tone;
   signed?: boolean;
+  animate?: boolean;
   className?: string;
 }) {
   const resolved = tone === "auto" ? (cents > 0 ? "positive" : cents < 0 ? "negative" : "neutral") : tone;
@@ -81,7 +84,7 @@ export function Money({
         className,
       )}
     >
-      {formatMoney(cents, { signed })}
+      {animate ? <MoneyCountUp cents={cents} signed={signed} /> : formatMoney(cents, { signed })}
     </span>
   );
 }

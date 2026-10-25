@@ -5,6 +5,8 @@ import Link from "next/link";
 import { BalanceChart } from "@/components/charts/balance-chart";
 import { CategorySpending } from "@/components/dashboard/category-spending";
 import { CreditCardVisual } from "@/components/dashboard/credit-card-visual";
+import { MoneyCountUp } from "@/components/motion/money-count-up";
+import { Reveal } from "@/components/motion/reveal";
 import { PeriodFilter } from "@/components/dashboard/period-filter";
 import { EmptyState, Money } from "@/components/shared";
 import { TransactionFormDialog } from "@/components/transactions/transaction-form-dialog";
@@ -112,7 +114,12 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
         </div>
       </div>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1fr)]">
+      <Reveal
+        trigger="mount"
+        stagger={0.08}
+        distance={18}
+        className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,1.45fr)_minmax(0,1fr)]"
+      >
         {/* Coluna 1: cartão e saldo */}
         <div className="grid content-start gap-5">
           <Card>
@@ -150,6 +157,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
                 <Money
                   cents={d.totalBalance}
                   tone={d.totalBalance < 0 ? "negative" : "neutral"}
+                  animate
                   className="text-3xl font-semibold tracking-tight"
                 />
                 <Pill tone={leftover >= 0 ? "positive" : "negative"}>Sobra {formatMoney(leftover, { signed: true })}</Pill>
@@ -186,7 +194,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
             <PanelTitle title="Evolução do saldo" subtitle="Saldo em conta no fim de cada dia" href="/contas" />
             <div className="text-center">
               <p className="text-xs text-muted-foreground">Saldo hoje</p>
-              <Money cents={d.totalBalance} className="text-3xl font-semibold tracking-tight" />
+              <Money cents={d.totalBalance} animate className="text-3xl font-semibold tracking-tight" />
             </div>
             {d.balance.length < 2 ? (
               <p className="py-10 text-center text-sm text-muted-foreground">O período ainda não começou.</p>
@@ -201,9 +209,15 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
             </div>
           </CardContent>
         </Card>
-      </div>
+      </Reveal>
 
-      <div className="grid gap-5 lg:grid-cols-[minmax(0,2.45fr)_minmax(0,1fr)]">
+      <Reveal
+        trigger="mount"
+        delay={0.2}
+        stagger={0.08}
+        distance={18}
+        className="grid gap-5 lg:grid-cols-[minmax(0,2.45fr)_minmax(0,1fr)]"
+      >
         <Card>
           <CardContent className="grid gap-2">
             <PanelTitle title="Últimas transações" subtitle="Movimentações mais recentes" href="/transacoes" />
@@ -287,7 +301,7 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
           </Card>
 
         </div>
-      </div>
+      </Reveal>
     </div>
   );
 }
@@ -341,7 +355,7 @@ function SummaryRow({ label, cents, detail, strong }: { label: string; cents: nu
           strong && cents > 0 && "text-positive",
         )}
       >
-        {formatMoney(cents, { signed: cents !== 0 })}
+        {strong ? <MoneyCountUp cents={cents} signed /> : formatMoney(cents, { signed: cents !== 0 })}
       </dd>
     </div>
   );

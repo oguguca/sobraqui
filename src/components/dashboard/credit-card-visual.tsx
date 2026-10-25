@@ -1,6 +1,7 @@
 import { ArrowUpRight, Nfc } from "lucide-react";
 import Link from "next/link";
 
+import { MoneyCountUp } from "@/components/motion/money-count-up";
 import { formatDate } from "@/domain/dates";
 import { formatMoney } from "@/domain/money";
 
@@ -39,7 +40,9 @@ export function CreditCardVisual({
         <Nfc className="size-5 opacity-80" aria-hidden />
       </div>
       <p className="relative mt-5 text-xs text-white/70">Fatura a pagar</p>
-      <p className="relative mt-0.5 text-3xl font-semibold tracking-tight tabular">{formatMoney(billCents)}</p>
+      <p className="relative mt-0.5 text-3xl font-semibold tracking-tight tabular">
+        <MoneyCountUp cents={billCents} />
+      </p>
       <div className="relative mt-4 h-1.5 overflow-hidden rounded-full bg-white/20" aria-hidden>
         <div className="h-full rounded-full bg-[#c8f04a]" style={{ width: `${usedRatio * 100}%` }} />
       </div>
