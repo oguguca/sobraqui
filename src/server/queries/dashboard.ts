@@ -210,6 +210,7 @@ async function loadBillsToPay(ctx: AuthContext, ledger: LedgerContext, today: st
       return invoices
         .filter((i) => i.remainingCents > 0 && monthOf(i.reference_month) <= openMonth)
         .map((i) => ({
+          invoiceId: i.id,
           cardId: card.id,
           cardName: card.name,
           remainingCents: i.remainingCents,

@@ -97,11 +97,15 @@ export const payInvoice = authedAction(
         }),
         "Fatura",
       );
-      const account = found(
-        await tx.bankAccount.findFirst({ where: { id: input.accountId, user_id: userId }, select: { archived_at: true } }),
-        "Conta",
-      );
-      if (account.archived_at) throw new ActionError("Esta conta está arquivada.");
+      // Dinheiro de fora das contas: só abate a fatura, sem mexer em saldo.
+      const external = input.source === "external";
+      if (!external) {
+        const account = found(
+          await tx.bankAccount.findFirst({ where: { id: input.accountId, user_id: userId }, select: { archived_at: true } }),
+          "Conta",
+        );
+        if (account.archived_at) throw new ActionError("Esta conta está arquivada.");
+      }
 
       const totals = (await invoiceTotals(tx, userId, [invoice.id])).get(invoice.id);
       const remaining = totals ? invoiceAmount(totals) - totals.paid_cents : 0;
@@ -116,8 +120,9 @@ export const payInvoice = authedAction(
           status: "paid",
           amount_cents: input.amount,
           occurred_on: dbDate(input.paidOn),
-          description: `Pagamento da fatura ${invoice.credit_card.name} ${month}/${year}`,
-          account_id: input.accountId,
+          description: `${input.amount < remaining ? "Pagamento parcial" : "Pagamento"} da fatura ${invoice.credit_card.name} ${month}/${year}`,
+          account_id: external ? null : input.accountId,
+          notes: external ? `Pago com dinheiro de fora das contas${input.origin ? `: ${input.origin}` : ""}.` : null,
           credit_card_id: invoice.credit_card_id,
           invoice_id: invoice.id,
         },

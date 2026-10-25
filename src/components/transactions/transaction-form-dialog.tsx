@@ -2,7 +2,7 @@
 
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useState } from "react";
-import { Controller, useForm, useWatch, type Control } from "react-hook-form";
+import { Controller, useForm, useWatch, type Control, type UseFormRegisterReturn } from "react-hook-form";
 
 import { FormField } from "@/components/form-field";
 import { Button } from "@/components/ui/button";
@@ -19,8 +19,10 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { splitInstallments } from "@/domain/credit-card";
+import { financedTotal, interestSummary, type InterestMode } from "@/domain/installments";
 import { FREQUENCY_LABEL, PAYMENT_METHOD_LABEL, PAYMENT_METHODS } from "@/domain/labels";
-import { formatMoney, parseMoney } from "@/domain/money";
+import { formatMoney, formatPercent, parseMoney } from "@/domain/money";
 import { useServerAction } from "@/hooks/use-server-action";
 import {
   transactionFormSchema,
@@ -75,6 +77,8 @@ export function TransactionFormDialog({
     cardId: options.cards[0]?.id ?? "",
     status: "paid",
     installments: 1,
+    interestMode: "none",
+    interestValue: "",
     repeat: "none",
     ...defaults,
   };
@@ -83,9 +87,9 @@ export function TransactionFormDialog({
     resolver: zodResolver(transactionFormSchema),
     defaultValues: initial,
   });
-  const [mode, source, installments, amount, paymentMethod, status] = useWatch({
+  const [mode, source, installments, amount, paymentMethod, status, interestMode, interestValue] = useWatch({
     control: form.control,
-    name: ["mode", "source", "installments", "amount", "paymentMethod", "status"],
+    name: ["mode", "source", "installments", "amount", "paymentMethod", "status", "interestMode", "interestValue"],
   });
   const usesCard = usesCreditCard({ mode, source, paymentMethod });
   const categoryKind = mode === "income" ? "income" : mode === "transfer" ? "transfer" : "expense";
@@ -95,6 +99,10 @@ export function TransactionFormDialog({
 
   const installmentCount = Number(installments) || 1;
   const amountCents = parseMoney(String(amount ?? "")) ?? 0;
+  const parceled = mode === "expense" && usesCard && installmentCount > 1;
+  const withInterest = parceled && interestMode !== "none";
+  const informedCents = parseMoney(String(interestValue ?? ""));
+  const totalCents = parceled ? financedTotal(amountCents, installmentCount, interestMode ?? "none", informedCents) : amountCents;
 
   const onSubmit = form.handleSubmit(() => {
     run(form.getValues(), {
@@ -165,7 +173,11 @@ export function TransactionFormDialog({
             </FormField>
 
             <div className="grid gap-4 sm:grid-cols-2">
-              <FormField id="tx-amount" label={installmentCount > 1 ? "Valor total (R$)" : "Valor (R$)"} error={err("amount")}>
+              <FormField
+                id="tx-amount"
+                label={withInterest ? "Valor à vista (R$)" : parceled ? "Valor total (R$)" : "Valor (R$)"}
+                error={err("amount")}
+              >
                 <Input id="tx-amount" inputMode="decimal" placeholder="0,00" className="tabular" {...form.register("amount")} />
               </FormField>
               <FormField
@@ -264,16 +276,7 @@ export function TransactionFormDialog({
                   items={options.cards.map((c) => ({ value: c.id, label: c.name }))}
                 />
                 {mode === "expense" && (
-                  <FormField
-                    id="tx-installments"
-                    label="Parcelas"
-                    error={err("installments")}
-                    hint={
-                      installmentCount > 1 && amountCents >= installmentCount
-                        ? `${installmentCount}× de ${formatMoney(Math.floor(amountCents / installmentCount))}`
-                        : undefined
-                    }
-                  >
+                  <FormField id="tx-installments" label="Parcelas" error={err("installments")}>
                     <Input
                       id="tx-installments"
                       type="number"
@@ -282,6 +285,18 @@ export function TransactionFormDialog({
                       {...form.register("installments")}
                     />
                   </FormField>
+                )}
+                {parceled && (
+                  <InstallmentInterest
+                    control={form.control}
+                    mode={interestMode ?? "none"}
+                    count={installmentCount}
+                    cashCents={amountCents}
+                    totalCents={totalCents}
+                    error={err("interestValue")}
+                    onModeChange={() => form.setValue("interestValue", "")}
+                    register={form.register("interestValue")}
+                  />
                 )}
               </div>
             ) : (
@@ -357,6 +372,89 @@ export function TransactionFormDialog({
         )}
       </DialogContent>
     </Dialog>
+  );
+}
+
+const INTEREST_LABEL: Record<InterestMode, string> = {
+  none: "Sem juros",
+  installment: "Valor da parcela",
+  total: "Total com juros",
+};
+
+/** Parcelado no cartão: sem juros, ou com juros pelo valor da parcela ou pelo total. */
+function InstallmentInterest({
+  control,
+  mode,
+  count,
+  cashCents,
+  totalCents,
+  error,
+  onModeChange,
+  register,
+}: {
+  control: Control<TransactionFormInput, unknown, TransactionFormValues>;
+  mode: InterestMode;
+  count: number;
+  cashCents: number;
+  totalCents: number;
+  error?: string;
+  onModeChange: () => void;
+  register: UseFormRegisterReturn<"interestValue">;
+}) {
+  const summary = interestSummary(cashCents, totalCents, count);
+  const ready = cashCents >= count && totalCents >= count;
+  const installment = ready ? splitInstallments(totalCents, count) : [];
+  return (
+    <div className="grid gap-3 rounded-xl bg-muted/50 p-3 sm:col-span-2">
+      <Controller
+        control={control}
+        name="interestMode"
+        render={({ field }) => (
+          <Tabs
+            value={field.value}
+            onValueChange={(v) => {
+              field.onChange(v);
+              onModeChange();
+            }}
+          >
+            <TabsList className="grid w-full grid-cols-3" aria-label="Juros do parcelamento">
+              {(Object.keys(INTEREST_LABEL) as InterestMode[]).map((m) => (
+                <TabsTrigger key={m} value={m}>
+                  {INTEREST_LABEL[m]}
+                </TabsTrigger>
+              ))}
+            </TabsList>
+          </Tabs>
+        )}
+      />
+      {mode !== "none" && (
+        <FormField
+          id="tx-interest-value"
+          label={mode === "installment" ? "Valor de cada parcela (R$)" : "Total a pagar com juros (R$)"}
+          error={error}
+        >
+          <Input id="tx-interest-value" inputMode="decimal" placeholder="0,00" className="tabular" {...register} />
+        </FormField>
+      )}
+      {ready && (
+        <p className="text-sm" aria-live="polite">
+          <span className="font-medium tabular">
+            {count}× de {formatMoney(installment[installment.length - 1])}
+          </span>
+          {installment[0] !== installment[installment.length - 1] && (
+            <span className="text-muted-foreground"> (1ª de {formatMoney(installment[0])})</span>
+          )}
+          <span className="text-muted-foreground"> · total {formatMoney(totalCents)}</span>
+          {summary.interestCents > 0 && (
+            <span className="block text-muted-foreground">
+              Juros de <span className="font-medium text-negative tabular">{formatMoney(summary.interestCents)}</span> (
+              {formatPercent(summary.totalRate)} no total
+              {summary.monthlyRate !== null && `, ≈${formatPercent(summary.monthlyRate)} ao mês`})
+            </span>
+          )}
+        </p>
+      )}
+    </div>
   );
 }
 

@@ -43,7 +43,8 @@ export function sourceLabel(t: Tx, lookups: Lookups): string {
     return `${lookups.accounts[t.account_id ?? ""] ?? "Conta"} → ${lookups.accounts[t.destination_account_id ?? ""] ?? "Conta"}`;
   }
   if (t.kind === "invoice_payment") {
-    return `${lookups.accounts[t.account_id ?? ""] ?? "Conta"} → ${lookups.cards[t.credit_card_id ?? ""] ?? "Cartão"}`;
+    const from = t.account_id ? (lookups.accounts[t.account_id] ?? "Conta") : "Outro dinheiro";
+    return `${from} → ${lookups.cards[t.credit_card_id ?? ""] ?? "Cartão"}`;
   }
   if (t.credit_card_id) return lookups.cards[t.credit_card_id] ?? "Cartão";
   return lookups.accounts[t.account_id ?? ""] ?? "Conta arquivada";

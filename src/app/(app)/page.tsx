@@ -4,6 +4,7 @@ import Link from "next/link";
 
 import { BalanceChart } from "@/components/charts/balance-chart";
 import { CategorySpending } from "@/components/dashboard/category-spending";
+import { PayInvoiceDialog } from "@/components/cards/pay-invoice-dialog";
 import { CreditCardVisual } from "@/components/dashboard/credit-card-visual";
 import { MoneyCountUp } from "@/components/motion/money-count-up";
 import { Reveal } from "@/components/motion/reveal";
@@ -126,16 +127,38 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
             <CardContent className="grid gap-4">
               <PanelTitle title="Cartão de crédito" subtitle="Fatura e limite" href={card ? `/cartoes/${card.id}` : "/cartoes"} />
               {card ? (
-                <CreditCardVisual
-                  cardId={card.id}
-                  name={card.name}
-                  brand={card.brand}
-                  billCents={cardBills.reduce((s, b) => s + b.remainingCents, 0)}
-                  dueDate={cardBills[0]?.dueDate ?? null}
-                  overdue={cardBills.some((b) => b.status === "overdue")}
-                  availableCents={card.available_cents}
-                  limitCents={card.limit_cents}
-                />
+                <>
+                  <CreditCardVisual
+                    cardId={card.id}
+                    name={card.name}
+                    brand={card.brand}
+                    billCents={cardBills.reduce((s, b) => s + b.remainingCents, 0)}
+                    dueDate={cardBills[0]?.dueDate ?? null}
+                    overdue={cardBills.some((b) => b.status === "overdue")}
+                    availableCents={card.available_cents}
+                    limitCents={card.limit_cents}
+                  />
+                  {cardBills[0]?.invoiceId && (
+                    <div className="grid grid-cols-2 gap-2">
+                      {(["pay", "reduce"] as const).map((variant) => (
+                        <PayInvoiceDialog
+                          key={variant}
+                          variant={variant}
+                          invoiceId={cardBills[0].invoiceId!}
+                          remainingCents={cardBills[0].remainingCents}
+                          accounts={ledger.formOptions.accounts}
+                          defaultAccountId={card.payment_account_id}
+                          today={ledger.today}
+                          trigger={
+                            <Button size="sm" variant={variant === "pay" ? "default" : "outline"} className="rounded-full">
+                              {variant === "pay" ? "Pagar fatura" : "Abater valor"}
+                            </Button>
+                          }
+                        />
+                      ))}
+                    </div>
+                  )}
+                </>
               ) : (
                 <EmptyState
                   icon={CreditCard}

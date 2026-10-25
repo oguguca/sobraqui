@@ -50,12 +50,22 @@ export const cardSchema = z.object({
 export type CardInput = z.input<typeof cardSchema>;
 export type CardValues = z.output<typeof cardSchema>;
 
-export const invoicePaymentSchema = z.object({
-  invoiceId: uuid,
-  accountId: uuid,
-  amount: moneyInput(),
-  paidOn: isoDate,
-});
+export const invoicePaymentSchema = z
+  .object({
+    invoiceId: uuid,
+    /** De onde veio o dinheiro: uma conta cadastrada ou de fora delas (não mexe em saldo). */
+    source: z.enum(["account", "external"]).default("account"),
+    accountId: z.string().default(""),
+    /** Só para "external": de onde veio (ex.: dinheiro vivo, cashback). */
+    origin: optionalText(80),
+    amount: moneyInput(),
+    paidOn: isoDate,
+  })
+  .superRefine((v, ctx) => {
+    if (v.source === "account" && !z.uuid().safeParse(v.accountId).success) {
+      ctx.addIssue({ code: "custom", path: ["accountId"], message: "Escolha a conta." });
+    }
+  });
 export type InvoicePaymentInput = z.input<typeof invoicePaymentSchema>;
 export type InvoicePaymentValues = z.output<typeof invoicePaymentSchema>;
 

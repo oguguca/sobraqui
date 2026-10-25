@@ -153,15 +153,31 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
                 <BankAmountForm invoiceId={invoice.id} bankAmountCents={invoice.bank_amount_cents} />
               </div>
             )}
-            {invoice.id && invoice.remainingCents > 0 && month <= currentMonth && (
-              <div className="px-2">
+            {invoice.id && invoice.remainingCents > 0 && (
+              <div className="flex flex-wrap gap-2 px-2">
+                {month <= currentMonth && (
+                  <PayInvoiceDialog
+                    invoiceId={invoice.id}
+                    remainingCents={invoice.remainingCents}
+                    accounts={ledger.formOptions.accounts}
+                    defaultAccountId={card.payment_account_id}
+                    today={today}
+                    trigger={<Button>Pagar fatura</Button>}
+                  />
+                )}
+                {/* Abater: pagar parte agora; em faturas futuras, antecipa parcelas. */}
                 <PayInvoiceDialog
+                  variant="reduce"
                   invoiceId={invoice.id}
                   remainingCents={invoice.remainingCents}
                   accounts={ledger.formOptions.accounts}
                   defaultAccountId={card.payment_account_id}
                   today={today}
-                  trigger={<Button>Pagar fatura</Button>}
+                  trigger={
+                    <Button variant={month <= currentMonth ? "outline" : "default"}>
+                      {month <= currentMonth ? "Abater valor" : "Antecipar pagamento"}
+                    </Button>
+                  }
                 />
               </div>
             )}

@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import { planInstallments } from "@/domain/credit-card";
 import { parts } from "@/domain/dates";
+import { interestNote } from "@/domain/installments";
 import { nextOccurrence } from "@/domain/recurrence";
 import type { Prisma } from "@/generated/prisma/client";
 import { transactionFormSchema, transactionUpdateSchema, usesCreditCard } from "@/lib/transaction-schema";
@@ -44,7 +45,11 @@ export const createTransaction = authedAction(
         amount_cents: v.amount,
         occurred_on: dbDate(v.occurredOn),
         category_id: v.categoryId,
-        notes: v.notes,
+        // Parcelado com juros: o resumo (à vista, total e juros) fica junto das observações.
+        notes:
+          v.cashAmount === null
+            ? v.notes
+            : [interestNote(v.cashAmount, v.amount, v.installments), v.notes].filter(Boolean).join("\n").slice(0, 2000),
         payment_method: kind === "expense" ? v.paymentMethod : null,
       } satisfies Prisma.TransactionUncheckedCreateInput;
 

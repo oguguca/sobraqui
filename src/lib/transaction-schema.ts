@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { financedTotal } from "@/domain/installments";
+import { parseMoney } from "@/domain/money";
 import { isoDate, moneyInput, name, optionalText, optionalUuid, uuid } from "@/lib/validation";
 
 // Formulário de lançamento manual. Cada "modo" vira um tipo de transação.
@@ -20,6 +22,12 @@ export const transactionFormSchema = z
     cardId: optionalUuid,
     status: z.enum(["paid", "pending"]).default("paid"),
     installments: z.coerce.number().int().min(1).max(72).default(1),
+    /**
+     * Parcelado no cartão: sem juros (o valor é o total) ou com juros, informando
+     * o valor da parcela ou o total. Nesses casos, `amount` é o valor à vista.
+     */
+    interestMode: z.enum(["none", "installment", "total"]).default("none"),
+    interestValue: z.string().trim().max(32).default(""),
     repeat: z.enum(["none", "weekly", "monthly", "yearly"]).default("none"),
   })
   .superRefine((v, ctx) => {
@@ -41,10 +49,29 @@ export const transactionFormSchema = z
     if (v.installments > 1 && v.amount < v.installments) {
       ctx.addIssue({ code: "custom", path: ["installments"], message: "Valor baixo demais para parcelar." });
     }
+    if (withInterest(v)) {
+      const informed = parseMoney(v.interestValue);
+      const label = v.interestMode === "installment" ? "o valor da parcela" : "o total com juros";
+      if (informed === null || informed <= 0) {
+        ctx.addIssue({ code: "custom", path: ["interestValue"], message: `Informe ${label}.` });
+      } else if (financedTotal(v.amount, v.installments, v.interestMode, informed) < v.amount) {
+        ctx.addIssue({ code: "custom", path: ["interestValue"], message: "O total parcelado ficou menor que o valor à vista." });
+      }
+    }
     if (v.repeat !== "none" && !((v.mode === "expense" || v.mode === "income") && !usesCard)) {
       ctx.addIssue({ code: "custom", path: ["repeat"], message: "Recorrência só para receitas e despesas em conta." });
     }
+  })
+  .transform(({ interestMode, interestValue, ...v }) => {
+    // Com juros, `amount` passa a ser o total que vai para as faturas; o à vista fica em `cashAmount`.
+    if (!withInterest({ ...v, interestMode })) return { ...v, cashAmount: null };
+    const total = financedTotal(v.amount, v.installments, interestMode, parseMoney(interestValue));
+    return { ...v, amount: total, cashAmount: v.amount };
   });
+
+function withInterest(v: { mode: string; source?: string; paymentMethod?: string; installments: number; interestMode: string }) {
+  return v.interestMode !== "none" && v.installments > 1 && v.mode === "expense" && usesCreditCard(v);
+}
 
 export type TransactionFormInput = z.input<typeof transactionFormSchema>;
 export type TransactionFormValues = z.output<typeof transactionFormSchema>;
