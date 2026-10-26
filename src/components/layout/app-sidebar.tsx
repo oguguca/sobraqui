@@ -69,11 +69,19 @@ export function AppSidebar({ email }: { email: string | null }) {
             <form action={signOut}>
               <SidebarMenuButton type="submit" tooltip="Sair" className="text-muted-foreground">
                 <LogOut />
-                <span className="truncate">Sair{email ? ` · ${email}` : ""}</span>
+                <span>Sair</span>
               </SidebarMenuButton>
             </form>
           </SidebarMenuItem>
         </SidebarMenu>
+        {email && (
+          <p
+            className="truncate px-2 pb-1 text-xs text-muted-foreground group-data-[collapsible=icon]:hidden"
+            title={email}
+          >
+            {email}
+          </p>
+        )}
       </SidebarFooter>
     </Sidebar>
   );

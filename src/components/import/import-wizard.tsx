@@ -507,7 +507,7 @@ function PreviewStep({
 
         <div className="flex flex-wrap gap-4">
           {target === "card" && (
-            <FormField id="import-invoice" label="Fatura que recebe estas compras" className="w-64">
+            <FormField id="import-invoice" label="Fatura que recebe estas compras" className="w-full sm:w-64">
               <Select value={invoiceMonth ?? ""} onValueChange={setInvoiceMonth}>
                 <SelectTrigger id="import-invoice" className="w-full capitalize">
                   <SelectValue placeholder="Selecione" />
@@ -523,7 +523,7 @@ function PreviewStep({
             </FormField>
           )}
           {target === "account" && needsPaymentCard && (
-            <FormField id="import-payment-card" label="Cartão pago pelos pagamentos de fatura" className="w-64">
+            <FormField id="import-payment-card" label="Cartão pago pelos pagamentos de fatura" className="w-full sm:w-64">
               <Select value={paymentCardId ?? ""} onValueChange={setPaymentCardId}>
                 <SelectTrigger id="import-payment-card" className="w-full">
                   <SelectValue placeholder={options.cards.length ? "Selecione" : "Nenhum cartão cadastrado"} />
@@ -576,7 +576,7 @@ function PreviewStep({
                       />
                     </TableCell>
                     <TableCell className="whitespace-nowrap tabular text-muted-foreground">{formatDate(r.occurredOn)}</TableCell>
-                    <TableCell className="max-w-72">
+                    <TableCell className="max-w-72 min-w-44">
                       <p className="truncate">{r.description}</p>
                       {r.suggestion && (
                         <p className={cn("text-xs", r.duplicate || r.possibleManualDuplicate ? "text-warning" : "text-muted-foreground")}>

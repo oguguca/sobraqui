@@ -110,6 +110,7 @@ export function TransactionsTable({
                           {t.recurring_transaction_id && <Repeat className="size-3" aria-label="Recorrente" />}
                           {t.import_batch_id && <FileUp className="size-3" aria-label="Importada" />}
                           <span className="sm:hidden">· {formatDate(t.occurred_on)}</span>
+                          {t.status === "pending" && <span className="text-warning sm:hidden">· Pendente</span>}
                         </p>
                       </div>
                     </div>

@@ -41,11 +41,11 @@ export function Pagination({
         <Button variant="outline" size="sm" asChild={page > 1} disabled={page <= 1}>
           {page > 1 ? (
             <Link href={href(page - 1)}>
-              <ChevronLeft /> Anterior
+              <ChevronLeft /> <span className="max-sm:sr-only">Anterior</span>
             </Link>
           ) : (
             <span>
-              <ChevronLeft /> Anterior
+              <ChevronLeft /> <span className="max-sm:sr-only">Anterior</span>
             </span>
           )}
         </Button>
@@ -55,11 +55,11 @@ export function Pagination({
         <Button variant="outline" size="sm" asChild={page < pages} disabled={page >= pages}>
           {page < pages ? (
             <Link href={href(page + 1)}>
-              Próxima <ChevronRight />
+              <span className="max-sm:sr-only">Próxima</span> <ChevronRight />
             </Link>
           ) : (
             <span>
-              Próxima <ChevronRight />
+              <span className="max-sm:sr-only">Próxima</span> <ChevronRight />
             </span>
           )}
         </Button>

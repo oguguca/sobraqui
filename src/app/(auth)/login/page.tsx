@@ -14,7 +14,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
   const next = typeof params.next === "string" ? params.next : "/";
   const passwordChanged = params.senha === "alterada" ? "Senha alterada. Entre com a nova senha." : undefined;
   const googleError =
-    params.erro === "google" ? "Não foi possível entrar com o Google. Use a conta cadastrada aqui." : undefined;
+    params.erro === "google" ? "Não foi possível entrar com o Google. Tente novamente." : undefined;
   const signupEnabled = process.env.ALLOW_SIGNUP === "true";
 
   return (

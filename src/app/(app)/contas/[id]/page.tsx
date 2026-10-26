@@ -69,8 +69,8 @@ export default async function AccountPage({ params, searchParams }: PageProps<"/
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Stat label="Saldo atual" cents={account.balance_cents} tone="auto" />
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+        <Stat label="Saldo atual" cents={account.balance_cents} tone="auto" className="col-span-2 sm:col-span-1" />
         <Stat label="Saldo inicial" cents={account.initial_balance_cents} />
         <Stat
           label="Pendente nesta conta"
@@ -106,12 +106,24 @@ export default async function AccountPage({ params, searchParams }: PageProps<"/
   );
 }
 
-function Stat({ label, cents, tone, hint }: { label: string; cents: number; tone?: "auto"; hint?: string }) {
+function Stat({
+  label,
+  cents,
+  tone,
+  hint,
+  className,
+}: {
+  label: string;
+  cents: number;
+  tone?: "auto";
+  hint?: string;
+  className?: string;
+}) {
   return (
-    <Card>
+    <Card className={className}>
       <CardContent>
         <p className="text-sm text-muted-foreground">{label}</p>
-        <Money cents={cents} tone={tone} className="mt-1 block text-2xl font-semibold tracking-tight" />
+        <Money cents={cents} tone={tone} className="mt-1 block text-xl font-semibold tracking-tight sm:text-2xl" />
         {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>

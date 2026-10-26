@@ -103,15 +103,18 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
             accounts={ledger.formOptions.accounts}
             accountId={period.accountId}
           />
-          <TransactionFormDialog
-            options={ledger.formOptions}
-            today={ledger.today}
-            trigger={
-              <Button className="rounded-full">
-                <Plus /> Novo lançamento
-              </Button>
-            }
-          />
+          {/* No celular o lançamento fica no botão "+" da barra inferior. */}
+          <div className="max-md:hidden">
+            <TransactionFormDialog
+              options={ledger.formOptions}
+              today={ledger.today}
+              trigger={
+                <Button className="rounded-full">
+                  <Plus /> Novo lançamento
+                </Button>
+              }
+            />
+          </div>
         </div>
       </div>
 
@@ -173,7 +176,8 @@ export default async function DashboardPage({ searchParams }: PageProps<"/">) {
               )}
             </CardContent>
           </Card>
-          <Card>
+          {/* No celular o saldo vem antes do cartão. */}
+          <Card className="max-lg:order-first">
             <CardContent>
               <p className="text-sm text-muted-foreground">Saldo em conta</p>
               <div className="mt-1 flex flex-wrap items-end justify-between gap-3">

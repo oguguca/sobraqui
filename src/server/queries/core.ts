@@ -129,3 +129,20 @@ export type FormOptions = {
   categories: { id: string; name: string; kind: Category["kind"]; color: string; icon: string }[];
   cards: { id: string; name: string }[];
 };
+
+/** Só as opções dos formulários, sem saldos: leve o bastante para o layout. */
+export async function listFormOptions(ctx: AuthContext): Promise<FormOptions> {
+  const where = { user_id: ctx.user.id, archived_at: null };
+  return ctx.db(async (tx) => {
+    const [accounts, categories, cards] = await Promise.all([
+      tx.bankAccount.findMany({ where, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+      tx.category.findMany({
+        where,
+        select: { id: true, name: true, kind: true, color: true, icon: true },
+        orderBy: [{ kind: "asc" }, { name: "asc" }],
+      }),
+      tx.creditCard.findMany({ where, select: { id: true, name: true }, orderBy: { name: "asc" } }),
+    ]);
+    return { accounts, categories, cards };
+  });
+}

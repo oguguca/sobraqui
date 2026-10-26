@@ -23,6 +23,8 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
+  // Permite usar env(safe-area-inset-*) na barra inferior do celular.
+  viewportFit: "cover",
   themeColor: [
     { media: "(prefers-color-scheme: light)", color: "#f7f6f1" },
     { media: "(prefers-color-scheme: dark)", color: "#111113" },

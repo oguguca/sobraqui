@@ -1,6 +1,6 @@
 "use client";
 
-import { Search, X } from "lucide-react";
+import { Search, SlidersHorizontal, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useState, useTransition } from "react";
 
@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { TRANSACTION_KIND_LABEL } from "@/domain/labels";
+import { cn } from "@/lib/utils";
 import type { FormOptions } from "@/server/queries/core";
 
 const ALL = "__all__";
@@ -18,6 +19,8 @@ export function TransactionFilters({ options }: { options: FormOptions }) {
   const params = useSearchParams();
   const [pending, startTransition] = useTransition();
   const [q, setQ] = useState(params.get("q") ?? "");
+  // No celular os filtros ficam recolhidos; a busca continua sempre visível.
+  const [open, setOpen] = useState(false);
 
   function update(changes: Record<string, string | null>) {
     const next = new URLSearchParams(params.toString());
@@ -38,6 +41,7 @@ export function TransactionFilters({ options }: { options: FormOptions }) {
   }, [q]);
 
   const hasFilters = ["q", "from", "to", "kind", "status", "category", "account", "card"].some((k) => params.has(k));
+  const activeCount = ["from", "to", "kind", "status", "category", "account", "card", "sort"].filter((k) => params.has(k)).length;
 
   const select = (key: string, placeholder: string, items: { value: string; label: string }[]) => (
     <Select value={params.get(key) ?? ALL} onValueChange={(v) => update({ [key]: v })}>
@@ -57,7 +61,7 @@ export function TransactionFilters({ options }: { options: FormOptions }) {
 
   return (
     <div className="grid gap-3" aria-busy={pending} data-print-hidden>
-      <div className="grid gap-3 sm:grid-cols-[1fr_auto_auto]">
+      <div className="grid grid-cols-[1fr_auto] gap-3 md:grid-cols-[1fr_auto_auto]">
         <div className="relative">
           <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
@@ -68,15 +72,33 @@ export function TransactionFilters({ options }: { options: FormOptions }) {
             aria-label="Buscar pela descrição"
           />
         </div>
-        <Input
-          type="date"
-          aria-label="De"
-          value={params.get("from") ?? ""}
-          onChange={(e) => update({ from: e.target.value })}
-        />
-        <Input type="date" aria-label="Até" value={params.get("to") ?? ""} onChange={(e) => update({ to: e.target.value })} />
+        <Button
+          type="button"
+          variant="outline"
+          className="md:hidden"
+          aria-expanded={open}
+          aria-controls="transaction-filters-more"
+          onClick={() => setOpen((v) => !v)}
+        >
+          <SlidersHorizontal /> Filtros
+          {activeCount > 0 && (
+            <span className="tabular rounded-full bg-primary px-1.5 text-xs text-primary-foreground">{activeCount}</span>
+          )}
+        </Button>
+        <div className={cn("col-span-2 grid grid-cols-2 gap-3 md:contents", !open && "max-md:hidden")}>
+          <Input
+            type="date"
+            aria-label="De"
+            value={params.get("from") ?? ""}
+            onChange={(e) => update({ from: e.target.value })}
+          />
+          <Input type="date" aria-label="Até" value={params.get("to") ?? ""} onChange={(e) => update({ to: e.target.value })} />
+        </div>
       </div>
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6">
+      <div
+        id="transaction-filters-more"
+        className={cn("grid grid-cols-2 gap-3 md:grid-cols-3 lg:grid-cols-6", !open && "max-md:hidden")}
+      >
         {select(
           "kind",
           "Todos os tipos",

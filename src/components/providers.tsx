@@ -10,7 +10,13 @@ export function Providers({ children }: { children: React.ReactNode }) {
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <TooltipProvider delayDuration={300}>
         {children}
-        <Toaster position="bottom-right" richColors closeButton />
+        {/* No celular, acima da barra inferior de navegação. */}
+        <Toaster
+          position="bottom-right"
+          richColors
+          closeButton
+          mobileOffset={{ bottom: "calc(5rem + env(safe-area-inset-bottom))" }}
+        />
       </TooltipProvider>
     </ThemeProvider>
   );

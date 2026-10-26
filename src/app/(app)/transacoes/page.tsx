@@ -53,7 +53,8 @@ export default async function TransactionsPage({ searchParams }: PageProps<"/tra
                 <Download /> Exportar CSV
               </Link>
             </Button>
-            {newButton}
+            {/* No celular o lançamento fica no botão "+" da barra inferior. */}
+            <div className="max-md:hidden">{newButton}</div>
           </>
         }
       />

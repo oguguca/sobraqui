@@ -147,7 +147,8 @@ export default async function BudgetPage({ searchParams }: PageProps<"/orcamento
                         </div>
                         <div className="text-right text-sm">
                           <p className="tabular font-medium">
-                            {formatMoney(usage.spentCents)} <span className="text-muted-foreground">/ {formatMoney(usage.limitCents)}</span>
+                            {formatMoney(usage.spentCents)}{" "}
+                            <span className="text-muted-foreground max-sm:block max-sm:text-xs">/ {formatMoney(usage.limitCents)}</span>
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {usage.remainingCents >= 0 ? (

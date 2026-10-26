@@ -49,14 +49,14 @@ export default async function ReportsPage({ searchParams }: PageProps<"/relatori
           <EmptyState icon={ChartPie} title="Sem lançamentos no período" description="Ajuste os filtros ou registre movimentações." />
         ) : (
           <>
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-4">
               <Kpi label="Receitas" cents={r.summary.incomeCents} />
               <Kpi label="Despesas" cents={r.summary.netExpenseCents} />
               <Kpi label="Resultado" cents={r.summary.resultCents} tone="auto" />
               <Card>
                 <CardContent>
                   <p className="text-sm text-muted-foreground">Taxa de poupança</p>
-                  <p className="mt-1 text-2xl font-semibold tabular">
+                  <p className="mt-1 text-xl font-semibold tabular sm:text-2xl">
                     {r.summary.savingsRate !== null ? formatPercent(r.summary.savingsRate) : "—"}
                   </p>
                 </CardContent>
@@ -111,8 +111,8 @@ export default async function ReportsPage({ searchParams }: PageProps<"/relatori
                       <TableHead className="text-right">Entradas</TableHead>
                       <TableHead className="text-right">Saídas</TableHead>
                       <TableHead className="text-right">Resultado</TableHead>
-                      {r.netWorth && <TableHead className="text-right">Saldo em contas</TableHead>}
-                      {r.netWorth && <TableHead className="text-right">Patrimônio</TableHead>}
+                      {r.netWorth && <TableHead className="hidden text-right sm:table-cell">Saldo em contas</TableHead>}
+                      {r.netWorth && <TableHead className="hidden text-right sm:table-cell">Patrimônio</TableHead>}
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -129,12 +129,12 @@ export default async function ReportsPage({ searchParams }: PageProps<"/relatori
                           <Money cents={m.resultCents} tone="auto" signed />
                         </TableCell>
                         {r.netWorth && (
-                          <TableCell className="text-right">
+                          <TableCell className="hidden text-right sm:table-cell">
                             <Money cents={m.accountsCents ?? 0} />
                           </TableCell>
                         )}
                         {r.netWorth && (
-                          <TableCell className="text-right">
+                          <TableCell className="hidden text-right sm:table-cell">
                             <Money cents={m.netWorthCents ?? 0} tone="auto" />
                           </TableCell>
                         )}
@@ -165,7 +165,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/relatori
                       <TableHeader>
                         <TableRow>
                           <TableHead>Categoria</TableHead>
-                          <TableHead className="text-right">Anterior</TableHead>
+                          <TableHead className="hidden text-right sm:table-cell">Anterior</TableHead>
                           <TableHead className="text-right">Atual</TableHead>
                           <TableHead className="text-right">Variação</TableHead>
                         </TableRow>
@@ -174,7 +174,7 @@ export default async function ReportsPage({ searchParams }: PageProps<"/relatori
                         {r.comparison.rows.map((c) => (
                           <TableRow key={c.categoryId ?? "none"}>
                             <TableCell className="max-w-40 truncate">{c.name}</TableCell>
-                            <TableCell className="text-right">
+                            <TableCell className="hidden text-right sm:table-cell">
                               <Money cents={c.previousCents} />
                             </TableCell>
                             <TableCell className="text-right">
@@ -262,7 +262,7 @@ function Kpi({ label, cents, tone }: { label: string; cents: number; tone?: "aut
     <Card>
       <CardContent>
         <p className="text-sm text-muted-foreground">{label}</p>
-        <Money cents={cents} tone={tone} className="mt-1 block text-2xl font-semibold tracking-tight" />
+        <Money cents={cents} tone={tone} className="mt-1 block text-xl font-semibold tracking-tight sm:text-2xl" />
       </CardContent>
     </Card>
   );

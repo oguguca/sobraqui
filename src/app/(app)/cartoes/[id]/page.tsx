@@ -88,8 +88,8 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
-        <Card>
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
+        <Card className="col-span-2 sm:col-span-1">
           <CardContent>
             <p className="text-sm text-muted-foreground">Limite disponível</p>
             <Money cents={card.available_cents} tone={card.available_cents < 0 ? "negative" : "neutral"} className="mt-1 block text-2xl font-semibold" />
@@ -99,7 +99,7 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
         <Card>
           <CardContent>
             <p className="text-sm text-muted-foreground">Comprometido no cartão</p>
-            <Money cents={Math.max(0, card.used_cents)} className="mt-1 block text-2xl font-semibold" />
+            <Money cents={Math.max(0, card.used_cents)} className="mt-1 block text-xl font-semibold sm:text-2xl" />
             <p className="mt-1 text-xs text-muted-foreground">
               faturas em aberto e parcelas futuras
             </p>
@@ -108,7 +108,7 @@ export default async function CardPage({ params, searchParams }: PageProps<"/car
         <Card>
           <CardContent>
             <p className="text-sm text-muted-foreground">Parcelas futuras</p>
-            <Money cents={futureTotal} className="mt-1 block text-2xl font-semibold" />
+            <Money cents={futureTotal} className="mt-1 block text-xl font-semibold sm:text-2xl" />
             <p className="mt-1 text-xs text-muted-foreground">{future.length} fatura(s) à frente</p>
           </CardContent>
         </Card>

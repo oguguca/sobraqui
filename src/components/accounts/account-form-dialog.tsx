@@ -28,9 +28,12 @@ import { createAccount, updateAccount } from "@/server/actions/accounts";
 export function AccountFormDialog({
   account,
   trigger,
+  defaultType = "checking",
 }: {
   account?: Tables<"accounts">;
   trigger: React.ReactNode;
+  /** Tipo pré-selecionado ao criar uma conta nova. */
+  defaultType?: AccountInput["type"];
 }) {
   const [open, setOpen] = useState(false);
   const create = useServerAction(createAccount);
@@ -40,7 +43,7 @@ export function AccountFormDialog({
 
   const defaults: AccountInput = {
     name: account?.name ?? "",
-    type: account?.type ?? "checking",
+    type: account?.type ?? defaultType,
     institution: account?.institution ?? "",
     initialBalance: centsToInput(account?.initial_balance_cents ?? 0),
     color: account?.color ?? "#0ea5e9",

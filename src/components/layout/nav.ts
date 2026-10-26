@@ -7,8 +7,8 @@ import {
   FileUp,
   LayoutDashboard,
   Landmark,
-  Tags,
   Target,
+  TrendingUp,
   Wallet,
   type LucideIcon,
 } from "lucide-react";
@@ -38,7 +38,7 @@ export const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     items: [
       { href: "/orcamento", label: "Orçamento", icon: Wallet },
       { href: "/metas", label: "Metas", icon: Target },
-      { href: "/categorias", label: "Categorias", icon: Tags },
+      { href: "/investimentos", label: "Investimentos", icon: TrendingUp },
     ],
   },
   {

@@ -49,8 +49,7 @@ export const auth = betterAuth({
         google: {
           clientId: process.env.GOOGLE_CLIENT_ID!,
           clientSecret: process.env.GOOGLE_CLIENT_SECRET!,
-          // Sem cadastro novo pelo Google enquanto o cadastro estiver fechado.
-          disableSignUp: !signupAllowed,
+          // Qualquer conta Google pode entrar; o primeiro acesso cria o usuário.
         },
       }
     : {},

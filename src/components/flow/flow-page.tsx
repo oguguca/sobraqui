@@ -122,10 +122,15 @@ export async function FlowPage({
         }
       />
 
-      <div className="mb-6 grid gap-4 sm:grid-cols-3">
+      <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
         <Figure label={copy.paid} cents={summary.paidCents} tone={kind === "income" ? "positive" : "negative"} />
         <Figure label={copy.pending} cents={summary.pendingCents} />
-        <Figure label={`Total em ${periodLabel}`} cents={total} hint={`${summary.count} lançamento(s)`} />
+        <Figure
+          label={`Total em ${periodLabel}`}
+          cents={total}
+          hint={`${summary.count} lançamento(s)`}
+          className="col-span-2 sm:col-span-1"
+        />
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
@@ -233,17 +238,19 @@ function Figure({
   cents,
   tone,
   hint,
+  className,
 }: {
   label: string;
   cents: number;
   tone?: "positive" | "negative";
   hint?: string;
+  className?: string;
 }) {
   return (
-    <Card>
+    <Card className={className}>
       <CardContent>
         <p className="text-sm text-muted-foreground first-letter:uppercase">{label}</p>
-        <Money cents={cents} tone={tone} className="mt-1 block text-2xl font-semibold tracking-tight" />
+        <Money cents={cents} tone={tone} className="mt-1 block text-xl font-semibold tracking-tight sm:text-2xl" />
         {hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
       </CardContent>
     </Card>
